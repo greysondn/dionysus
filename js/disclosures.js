@@ -29,8 +29,8 @@ function datumText(d, seatName) {
   if (d.kind === "journal") return `A journal note of ${seatName(d.owner)} (seen by: ${d.visibility})`;
   const owner = d.owner != null ? seatName(d.owner) : "the table";
   const to = { named: "chosen seats", gm: "the GM", self: "only themself", party: "their party", scene: "their scene" }[d.privacy] || d.privacy;
-  if (d.event_type?.startsWith("msg.")) return `A ${d.event_type.slice(4)} from ${owner}, to ${to} · event ${d.seq}`;
-  return `${d.event_type} for ${owner} · event ${d.seq}`;
+  if (d.event_type?.startsWith("msg.")) return `A ${d.event_type.slice(4)} from ${owner}, to ${to} · event ${d.sequence}`;
+  return `${d.event_type} for ${owner} · event ${d.sequence}`;
 }
 
 /** List a match's hidden data you may know of, and release or reclassify what you may. `after` runs after a change. */

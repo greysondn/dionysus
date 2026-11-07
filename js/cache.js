@@ -74,7 +74,7 @@ export class FileCache {
     await idb(this.tx("readwrite").delete(hash));
     this.keys.delete(hash);
     this.plain.delete(hash);
-    if (this.urls.has(hash)) URL.revokeObjectURL(this.urls.get(hash));
+    if (this.urls.has(hash)) this.urls.get(hash).then((u) => URL.revokeObjectURL(u), () => {});
     this.urls.delete(hash);
   }
 
@@ -137,6 +137,19 @@ export class FileCache {
   }
 
   async decrypt(hash) {
+    const { parts, compressed } = await this.decryptChunks(hash);
+    let body = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const p of parts) { body.set(p, at); at += p.length; }
+    if (compressed) {
+      const stream = new Blob([body]).stream().pipeThrough(new DecompressionStream("deflate"));
+      body = new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+    return body;
+  }
+
+  /** The file's plaintext as its decrypted chunks, not yet joined, and whether they still need inflating. */
+  async decryptChunks(hash) {
     const keyB64 = this.keys.get(hash);
     if (!keyB64) throw new Error("no key for that file yet");
     const served = await this.read(hash);
@@ -149,25 +162,16 @@ export class FileCache {
     const raw = Uint8Array.from(atob(keyB64), (c) => c.charCodeAt(0));
     const key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
     const parts = [];
-    let pos = 10, i = 0, total = 0;
+    let pos = 10, i = 0;
     while (pos < served.length) {
       const sealed = served.subarray(pos, pos + size + 16);
       const iv = new Uint8Array(12);
       new DataView(iv.buffer).setBigUint64(4, BigInt(i));
-      const plain = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, sealed));
-      parts.push(plain);
-      total += plain.length;
+      parts.push(new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, sealed)));
       pos += sealed.length;
       i++;
     }
-    let body = new Uint8Array(total);
-    let at = 0;
-    for (const p of parts) { body.set(p, at); at += p.length; }
-    if (compressed) {
-      const stream = new Blob([body]).stream().pipeThrough(new DecompressionStream("deflate"));
-      body = new Uint8Array(await new Response(stream).arrayBuffer());
-    }
-    return body;
+    return { parts, compressed };
   }
 
   async text(hash) {
@@ -178,10 +182,19 @@ export class FileCache {
     return JSON.parse(await this.text(hash));
   }
 
-  async url(hash, mime) {
+  /** An object URL for the file. Media (precompressed, like audio and video) goes straight from its decrypted chunks
+   * into the Blob, and the plaintext is not kept beside it: a 200 MB video costs its served copy and the Blob (which
+   * the browser may page to disk), not two more joined copies held for the session. */
+  url(hash, mime) {
     if (!this.urls.has(hash)) {
-      const bytes = await this.plaintext(hash);
-      this.urls.set(hash, URL.createObjectURL(new Blob([bytes], { type: mime || "application/octet-stream" })));
+      const p = (async () => {
+        const type = mime || "application/octet-stream";
+        if (this.plain.has(hash)) return URL.createObjectURL(new Blob([await this.plain.get(hash)], { type }));
+        const { parts, compressed } = await this.decryptChunks(hash);
+        return URL.createObjectURL(new Blob(compressed ? [await this.plaintext(hash)] : parts, { type }));
+      })();
+      this.urls.set(hash, p);
+      p.catch(() => this.urls.delete(hash));
     }
     return this.urls.get(hash);
   }

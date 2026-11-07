@@ -91,6 +91,7 @@ button.wide { width: 100%; }
 .badge { display: inline-block; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 6px;
   margin-left: 6px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-2); vertical-align: middle; }
 .badge.gm { color: var(--accent); border-color: var(--accent); }
+.badge.dev { color: var(--warn, var(--accent)); border-color: currentColor; border-style: dashed; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--line); margin-left: 6px; }
 .dot.on { background: var(--good); }
 
@@ -127,7 +128,7 @@ button.wide { width: 100%; }
 .rating-row { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-td.num, .num { font-variant-numeric: tabular-nums; }
+td.number, .number { font-variant-numeric: tabular-nums; }
 .stat-block { margin-bottom: 16px; }
 .admin-section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; overflow-x: auto; }
 .admin-table td { font-size: 0.92em; }
@@ -168,6 +169,7 @@ dialog footer { display: flex; gap: 8px; justify-content: flex-end; padding: 12p
 .segmented button { border-radius: 0; margin-left: -1px; }
 .segmented button:first-child { border-radius: 8px 0 0 8px; } .segmented button:last-child { border-radius: 0 8px 8px 0; }
 .tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.view-from { display: inline-flex; gap: 6px; align-items: center; font-size: 0.9em; }
 .seat-strip { display: flex; gap: 8px; padding: 8px 16px; overflow-x: auto; background: var(--bg-2); border-bottom: 1px solid var(--line); }
 .seat-card { flex: 0 0 auto; min-width: 150px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
 .seat-card.me { border-color: var(--accent); }
@@ -189,7 +191,7 @@ dialog footer { display: flex; gap: 8px; justify-content: flex-end; padding: 12p
 .controls button.flow { border-color: var(--accent); }
 
 /* the generic state board: a mechanic's own corner, made readable */
-.state-panel .mech + .mech { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.state-panel .mechanic + .mechanic { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .view-both .state-panel:only-child, .table-main > .state-panel { font-size: 1.05rem; }
 dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
 dl.kv dt { color: var(--muted); text-transform: capitalize; }
@@ -220,6 +222,12 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .scene .place-label { fill: #f0e6cc; font: 600 24px var(--font-ui); paint-order: stroke; stroke: rgb(0 0 0 / 0.5); stroke-width: 3px; }
 .scene .place.actionable { cursor: pointer; }
 .scene .place.actionable:hover .place-slot { stroke: #f0d79a; stroke-dasharray: none; }
+.scene .place-hit { fill: transparent; }
+.scene .fan-card { cursor: grab; }
+.scene .fan-card.dragging { cursor: grabbing; pointer-events: none; filter: drop-shadow(0 8px 12px rgb(0 0 0 / 0.5)); }
+.scene .insert-marker { stroke: #f0d79a; stroke-width: 5; stroke-linecap: round; pointer-events: none; }
+.scene .placemat-frame { pointer-events: none; }
+.scene .scene-label { fill: #f0e6cc; font: 600 20px var(--font-ui); paint-order: stroke; stroke: rgb(0 0 0 / 0.4); stroke-width: 3px; pointer-events: none; }
 .scene .mark { fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .scene .mark.personal { stroke-dasharray: 2 6; }
 .scene .mark-text { font: 600 20px var(--font-ui); }
@@ -269,7 +277,13 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .bar small { font-size: 0.7em; color: var(--muted); }
 .settings-table tr.locked { opacity: 0.6; }
 .settings-table th { font-weight: 500; font-family: var(--font-mono); font-size: 0.85em; }
-.display-prefs { margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.display-preferences { margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.look-thumb { display: inline-flex; width: 48px; height: 48px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--bg, transparent); }
+.look-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.look-slots td { vertical-align: middle; }
+.look-save { display: flex; gap: 8px; margin: 12px 0; }
+.look-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; max-height: 50vh; overflow: auto; }
+.look-pick { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px; }
 .journal-entry { border-bottom: 1px solid var(--line); padding: 8px 0; }
 
 /* ------------------------------------------------------------------------ projection */
@@ -286,6 +300,22 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .projector.calibrating .projector-help { display: block; }
 .projector-help p { margin: 2px 0; }
 .projector-help kbd { border-color: #666; }
+.projector-buttons { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
+.projector-buttons button { color: #eee; background: rgb(255 255 255 / 0.06); border-color: rgb(255 255 255 / 0.25); }
+.projector-buttons button.on { background: rgb(255 209 102 / 0.2); border-color: #ffd166; }
+.projector-reveal { position: absolute; right: 16px; bottom: 16px; color: #eee; background: rgb(20 20 20 / 0.85); border-color: #666;
+  display: none; cursor: pointer; }
+.projector.peek { cursor: default; }
+.projector.peek .projector-reveal { display: block; }
+/* a game without a scene projects its public state, large, in the square */
+.projection-board { position: relative; width: 100%; height: 100%; background: #000; color: #eee; padding: 48px; font-size: 2rem; overflow: hidden;
+  display: flex; flex-direction: column; gap: 24px; }
+.projection-board h2 { margin: 0; color: #f0d79a; font-size: 2.6rem; }
+.projection-board .mechanic > h3 { font-size: 1.2rem; color: #888; }
+.projection-board .state-panel { background: transparent; border: 0; padding: 0; font-size: inherit; }
+.projection-board dd.big-number { font-size: 4rem; }
+.projection-board table.scoreboard td { font-size: 2.4rem; }
+.projection-focus { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
 /* ------------------------------------------------------------------------ narrow screens */
 @media (max-width: 900px) {
@@ -300,6 +330,16 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
   .composer .row { flex-wrap: wrap; }
 }
 
+/* the hand view: one column, just this seat's part of the table */
+.table-body.hand-only { grid-template-columns: minmax(0, 1fr); }
+.table-main.view-hand { width: min(860px, 100%); margin: 0 auto; }
+.turn-line { margin: 0; font-weight: 600; color: var(--muted); }
+.turn-line.mine { color: var(--accent); }
+.chat-fold { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.chat-fold > summary { padding: 10px 14px; cursor: pointer; font-weight: 600; }
+.chat-fold > .chat-panel { border: 0; border-top: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); }
+.chat-fold .log { max-height: 40vh; }
+
 /* in the combined view the scene takes what is left, and the controls and hand stay docked below it */
 .table-main.view-both { overflow: hidden; }
 .table-main.view-both > .scene-wrap { flex: 1 1 auto; min-height: 220px; }
@@ -309,6 +349,9 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .table-main.view-both > .hand-panel .hand-card { width: 78px; }
 .table-main.view-both > .state-panel { flex: 1 1 auto; overflow: auto; }
 .scene .cue { animation: cue 2.5s ease-out forwards; pointer-events: none; }
+.scene foreignObject.video, .scene-video { pointer-events: none; }
+.scene-video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.cue-bar { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px; z-index: 2; }
 @keyframes cue { 0% { opacity: 0; } 15% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
 
 /* joining with an invite, and inviting players */
@@ -343,6 +386,19 @@ textarea.code { font: 12px/1.4 var(--font-mono); word-break: break-all; min-heig
 .sheets h4 { margin: 4px 0; }
 dd.derived { cursor: help; }
 .breakdown { font-family: var(--font-mono); font-size: 0.75em; }
+.sheets h4 { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ------------------------------------------------------------------------ exports: a sheet to print or save */
+dialog.dialog:has(.export-preview) { width: min(860px, calc(100vw - 32px)); }
+.export-preview { margin-top: 10px; }
+.export-preview svg { display: block; width: 100%; height: auto; background: #fff; color: #1d1a16; border-radius: 4px; box-shadow: var(--shadow); }
+#print-root { display: none; }
+@media print {
+  body.printing > :not(#print-root) { display: none !important; }
+  body.printing { background: #fff !important; margin: 0; padding: 0; }
+  body.printing #print-root { display: block; height: 100vh; overflow: hidden; }
+  #print-root svg { display: block; color: #1d1a16; }
+}
 .disclosures-panel { max-width: 720px; }
 .disclosures-panel tr.released td:first-child { color: var(--muted); }
 .disclosures-panel select { max-width: 260px; }

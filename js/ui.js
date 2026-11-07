@@ -111,7 +111,7 @@ export function schemaForm(schema, initial = {}, label = (k) => k) {
   return box;
 }
 
-export function fmtTime(iso) {
+export function formatTime(iso) {
   if (!iso) return "";
   const d = new Date(iso);
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });

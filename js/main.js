@@ -6,7 +6,7 @@ import { Net } from "./net.js";
 import { ReplayScreen } from "./replay.js";
 import { TableScreen } from "./table.js";
 import { Text } from "./text.js";
-import { bytes, clear, dialog, fmtTime, h, toast } from "./ui.js";
+import { bytes, clear, dialog, formatTime, h, toast } from "./ui.js";
 
 const TOKEN = "dionysus.session";               // one session per server: dionysus.session.<server_id>
 const KEY = "dionysus.redial";                  // a reconnect key and the details to re-dial, per server: dionysus.redial.<server_id>
@@ -211,9 +211,9 @@ class App {
 
   freshNet() {
     const net = new Net();
-    // carry on numbering actions where the last connection stopped: the server answers a client_seq it has seen with
+    // carry on numbering actions where the last connection stopped: the server answers a client_sequence it has seen with
     // that action's ack (a retry), so a new connection must not reuse one
-    if (this.net) net.clientSeq = Math.max(net.clientSeq, this.net.clientSeq);
+    if (this.net) net.clientSequence = Math.max(net.clientSequence, this.net.clientSequence);
     net.addEventListener("closed", () => this.onClosed());
     net.addEventListener("notice", (e) => this.onNotice(e.detail));
     this.cache.net = net;
@@ -276,7 +276,6 @@ class App {
     }
     const games = await this.net.request("games.list");
     this.games = games.games;
-    this.bots = games.bots;
     const hash = location.hash.match(/^#table\/([\w-]+)/);
     const replay = location.hash.match(/^#replay\/([\w-]+)\/(\d+)\/(own|released)(?:\/(\d+))?/);
     const resume = this.resumeTable;
@@ -383,7 +382,7 @@ class App {
   endedCard(t) {
     const played = t.matches.filter((m) => m.status !== "running");
     return h("article.table-card", {},
-      h("div", {}, h("h3", {}, t.name), h("p.muted", {}, `${this.gameName(t.game_id)} · ${played.length} match${played.length === 1 ? "" : "es"} · ${fmtTime(t.created_at)}${t.archived ? " · archived" : ""}`)),
+      h("div", {}, h("h3", {}, t.name), h("p.muted", {}, `${this.gameName(t.game_id)} · ${played.length} match${played.length === 1 ? "" : "es"} · ${formatTime(t.created_at)}${t.archived ? " · archived" : ""}`)),
       h("div.actions", {}, played.map((m) => h("button", { onclick: () => this.chooseReplay(t.table_id, m.number) }, `Replay match ${m.number}`))));
   }
 
@@ -399,7 +398,7 @@ class App {
     if (choice) this.openReplay(tableId, number, choice);
   }
 
-  /** Open a match's replay. opts: { view: "own" | "released", seat, timeline, atSeq (the event to open at) }. */
+  /** Open a match's replay. opts: { view: "own" | "released", seat, timeline, atSequence (the event to open at) }. */
   async openReplay(id, number, opts = {}) {
     if (this.table) {
       this.net.request("tables.leave", { table_id: this.table.id }).catch(() => {});
@@ -428,7 +427,8 @@ class App {
   gameCard(g) {
     const players = g.max_players && g.max_players !== g.min_players ? `${g.min_players}–${g.max_players} players` : `${g.min_players} players`;
     return h("article.game-card", {},
-      h("h3", {}, g.name), h("p.muted", {}, `${players} · ${g.archetype.replace("_", " ")} · v${g.version}`),
+      h("h3", {}, g.name, g.dev ? h("span.badge.dev", { title: "In development: loaded without packing, and its tables are never rated" }, "dev") : null),
+      h("p.muted", {}, `${players} · ${g.archetype.replace("_", " ")} · v${g.version}`),
       h("p.small", {}, g.mechanics.map((m) => m.mechanic_id).join(", ")),
       h("p.small.muted", {}, `${bytes(g.download_bytes)} to download`),
       h("button", { onclick: () => this.newTable(g) }, "Play"));
@@ -440,12 +440,27 @@ class App {
     const status = m.status === "running" ? `match ${m.number} in play` : m.status === "ready_to_end" ? "ready to end" : t.status === "ended" ? "ended" : "in the lobby";
     const mine = t.my_seats.length;
     return h("article.table-card", {},
-      h("div", {}, h("h3", {}, t.name), h("p.muted", {}, `${t.game_name} · ${status} · ${seated}/${t.seats.length} seated`),
+      h("div", {}, h("h3", {}, t.name, t.dev ? h("span.badge.dev", { title: "A game in development: this table is never rated and keeps no stats on profiles" }, "dev") : null),
+        h("p.muted", {}, `${t.game_name} · ${status} · ${seated}/${t.seats.length} seated`),
         h("div.seat-dots", {}, t.seats.map((x) => h("span", { class: x.occupied ? "dot on" : "dot", title: x.name || `seat ${x.seat_id} (empty)` })))),
       h("div.actions", {},
         mine ? h("button.primary", { onclick: () => this.openTable(t.table_id, { view: "both" }) }, "Rejoin") :
           t.seats.some((x) => !x.occupied) ? h("button.primary", { onclick: () => this.openTable(t.table_id, { seat: t.seats.find((x) => !x.occupied).seat_id, view: "both" }) }, "Take a seat") : null,
-        h("button", { onclick: () => this.openTable(t.table_id, { view: "table" }) }, "Table view")));
+        h("button", { onclick: () => this.openTable(t.table_id, { view: "table" }) }, "Table view"),
+        t.may_close ? h("button.ghost", { onclick: () => this.closeTable(t) }, "Close") : null));
+  }
+
+  /** End a table from the lobby (its creator or GM, when no one else is seated and connected; an admin, always). */
+  async closeTable(t) {
+    const ok = await dialog(`Close ${t.name}?`, h("p", {}, "The table ends for good, and any match in play is abandoned. Its finished matches stay watchable under Finished tables."),
+      [["Close the table", true, "danger"], ["Keep it", false]]);
+    if (!ok) return;
+    try {
+      await this.net.request("tables.close", { table_id: t.table_id });
+    } catch (e) {
+      toast(e.message, "warn");
+    }
+    this.lobby();
   }
 
   async newTable(game) {
@@ -464,7 +479,7 @@ class App {
       name.value = g.name;
       clear(bots, Array.from({ length: Math.max(0, Number(players.value) - 1) }, (_, i) =>
         h("label.field.inline", {}, h("span", {}, `Seat ${i + 2 + (gm.checked ? 1 : 0)}`),
-          h("select", { dataset: { seat: i + 2 + (gm.checked ? 1 : 0) } }, h("option", { value: "" }, "a person"), this.bots.map((b) => h("option", { value: b }, `bot: ${b}`))))));
+          h("select", { dataset: { seat: i + 2 + (gm.checked ? 1 : 0) } }, h("option", { value: "" }, "a person"), (g.bots || []).map((b) => h("option", { value: b }, `bot: ${b}`))))));
     };
     select.addEventListener("change", update);
     players.addEventListener("input", update);
@@ -576,7 +591,7 @@ class App {
       if (created.qr_svg) qr.innerHTML = created.qr_svg;          // drawn by our own server
       shown = h("section.invite-card", {},
         h("h3", {}, created.label ? `Invite for ${created.label}` : "A new invite"),
-        h("p.muted", {}, `Send this to the player, privately: a chat they trust, or show them the QR code. It works once, for ${Math.round(created.ttl_seconds / 60)} minutes.`),
+        h("p.muted", {}, `Send this to the player, privately: a chat they trust, or show them the QR code. It works once, for ${Math.round(created.time_to_live_seconds / 60)} minutes.`),
         h("div.invite-body", {}, qr, h("div", {},
           h("textarea.code", { rows: 6, readonly: true, spellcheck: "false", onfocus: (e) => e.target.select() }, created.code),
           h("div.row", {}, h("button.primary", { onclick: () => copy(created.code, "invite code") }, "Copy the code"),
@@ -654,9 +669,9 @@ class App {
         h("p.muted", {}, "No rated matches yet."),
       h("h3", {}, "Recorded stats"),
       Object.keys(statsBy).length ? Object.entries(statsBy).map(([g, rows]) => h("div.stat-block", {}, h("h4", {}, this.gameName(g)),
-        h("table.stats", {}, h("tbody", {}, rows.map((s) => h("tr", {}, h("th", {}, s.name), h("td", {}, s.bucket ? `[${s.bucket}]` : ""), h("td.num", {}, fmt(s.value)), h("td.muted.small", {}, `${s.samples} samples`))))))) :
+        h("table.stats", {}, h("tbody", {}, rows.map((s) => h("tr", {}, h("th", {}, s.name), h("td", {}, s.bucket ? `[${s.bucket}]` : ""), h("td.number", {}, fmt(s.value)), h("td.muted.small", {}, `${s.samples} samples`))))))) :
         h("p.muted", {}, "None yet."),
-      r.recent.length ? [h("h3", {}, "Recent matches"), h("ul.recent", {}, r.recent.map((m) => h("li", {}, `${m.table} (${this.gameName(m.game_id)}) · ${m.competitive?.rank ? `placed ${m.competitive.rank}` : "unranked"} · ${fmtTime(m.ended_at)} `,
+      r.recent.length ? [h("h3", {}, "Recent matches"), h("ul.recent", {}, r.recent.map((m) => h("li", {}, `${m.table} (${this.gameName(m.game_id)}) · ${m.competitive?.rank ? `placed ${m.competitive.rank}` : "unranked"} · ${formatTime(m.ended_at)} `,
         h("button.ghost.small", { onclick: () => this.chooseReplay(m.table_id, m.number) }, "Replay"))))] : null));
   }
 
@@ -705,10 +720,10 @@ class App {
       board.rows.length ? h("table.board", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Player"), h("th", {}, "Rating"), h("th", {}, "Track"), h("th", {}, "Matches"))),
         h("tbody", {}, board.rows.map((r, i) => h("tr", {}, h("td", {}, i + 1),
           h("td", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.go("profile", r.account_id); } }, r.account), r.is_bot ? h("span.badge", {}, "bot") : null),
-          h("td.num", {}, r.text), h("td.muted", {}, r.track.replace(/_/g, " ")), h("td.num", {}, r.matches))))) : h("p.muted", {}, "No rated matches of this game yet."),
+          h("td.number", {}, r.text), h("td.muted", {}, r.track.replace(/_/g, " ")), h("td.number", {}, r.matches))))) : h("p.muted", {}, "No rated matches of this game yet."),
       game?.challenges?.length ? [h("h3", {}, "Challenges"), h("ul", {}, game.challenges.map((c) => h("li", {}, `${c.name}: ${Object.values(c.ratings)[0] ? Math.round(Object.values(c.ratings)[0].value) : "unrated"}`)))] : null,
       global.stats.length ? [h("h3", {}, "Across everyone who plays it"), h("table.stats", {}, h("tbody", {}, global.stats.map((s) =>
-        h("tr", {}, h("th", {}, s.key.split(":")[1]), h("td", {}, s.bucket ? `[${s.bucket}]` : ""), h("td.num", {}, fmt(s.value)), h("td.muted", {}, s.holder ? `held by ${s.holder}` : "")))))] : null));
+        h("tr", {}, h("th", {}, s.key.split(":")[1]), h("td", {}, s.bucket ? `[${s.bucket}]` : ""), h("td.number", {}, fmt(s.value)), h("td.muted", {}, s.holder ? `held by ${s.holder}` : "")))))] : null));
   }
 
   // ---------------------------------------------------------------- admin
@@ -723,8 +738,9 @@ class App {
     const fillBots = () => {
       const g = this.games.find((x) => x.game_id === gameSel.value);
       const n = Math.max(2, g.min_players || 1);
+      const bots = g.bots || [];
       clear(botSeats, Array.from({ length: Math.min(n, g.max_players || n) }, (_, i) =>
-        h("select", { dataset: { i } }, this.bots.map((b, j) => h("option", { value: b, selected: j === i % this.bots.length }, b)))));
+        h("select", { dataset: { i } }, bots.map((b, j) => h("option", { value: b, selected: j === i % bots.length }, b)))));
     };
     gameSel.addEventListener("change", fillBots);
     fillBots();
@@ -734,9 +750,9 @@ class App {
     this.shell("admin", h("div.admin", {},
       section("Plugins",
         h("button", { onclick: async () => { await this.net.request("admin.plugins.rescan"); toast("Rescanned."); this.admin(); } }, "Rescan plugins"),
-        h("table.admin-table", {}, h("tbody", {}, plugins.plugins.map((p) => h("tr", { class: p.status }, h("td", {}, p.plugin_id), h("td", {}, p.kind), h("td", {}, p.version),
+        h("table.admin-table", {}, h("tbody", {}, plugins.plugins.map((p) => h("tr", { class: p.status }, h("td", {}, p.plugin_id, p.dev ? h("span.badge.dev", {}, "dev") : null), h("td", {}, p.kind), h("td", {}, p.version),
           h("td", {}, h("span.status", { class: p.status }, p.status)),
-          h("td", {}, ["game", "mechanic", "theme"].includes(p.kind) && p.status !== "broken" ? h("button.ghost.small", { onclick: async () => {
+          h("td", {}, ["game", "bundle", "mechanic", "theme"].includes(p.kind) && p.status !== "broken" ? h("button.ghost.small", { onclick: async () => {
             await this.net.request("admin.plugins.enable", { kind: p.kind, id: p.plugin_id, version: p.version, enabled: p.status !== "loaded" }); this.admin(); } }, p.status === "loaded" ? "Switch off" : "Switch on") : null),
           h("td.small", {}, p.problems.join("; "))))))),
       section("Runtime alerts", alerts.alerts.length ? h("ul.alerts", {}, alerts.alerts.slice(-50).reverse().map((a) => h("li", {}, h("b", {}, a.kind), ` ${a.detail}`))) : h("p.muted", {}, "None.")),
@@ -768,7 +784,7 @@ class App {
       section("Ended tables",
         h("p.muted", {}, "Export an ended table's log to a replay bundle (kept on the server, and yours to download), then prune it from the database. Results, recorded stats and ratings stay; replays then load from the bundle and still follow the table's release rules. A pruned table is frozen: what is released stays as it was."),
         ended.tables.length ? h("table.admin-table", {}, h("tbody", {}, ended.tables.map((t) => h("tr", {},
-          h("td", {}, t.name), h("td", {}, this.gameName(t.game_id)), h("td.small.muted", {}, `${t.matches.length} match(es)${t.autoplay ? " · autoplay" : ""}`),
+          h("td", {}, t.name), h("td", {}, this.gameName(t.game_id)), h("td.small.muted", {}, `${t.matches.length} match(es)${t.autoplay ? " · autoplay" : ""}${t.dev ? " · dev" : ""}`),
           h("td", {}, t.archived ? "archived" : t.exported ? "exported" : ""),
           h("td", {},
             !t.archived ? h("button.ghost.small", { onclick: () => this.adminTable("admin.tables.export", t, "Exported.") }, t.exported ? "Export again" : "Export") : null,

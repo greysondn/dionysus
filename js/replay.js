@@ -1,7 +1,8 @@
 // Replays: a match played back from the log, as one seat saw it ("own") or as anyone may see it now ("released"),
 // drawn by the table's own renderer.
-import { apply, TableScreen } from "./table.js";
+import { TableScreen } from "./table.js";
 import { openDisclosures } from "./disclosures.js";
+import { apply } from "./patch.js";
 import { bytes, clear, dialog, h, toast } from "./ui.js";
 
 const KEYFRAME_EVERY = 25;                 // a copy of the state every so many steps, so seeking stays quick
@@ -79,7 +80,7 @@ export class ReplayScreen extends TableScreen {
     addEventListener("keydown", this.onKey);
     this.layout();
     // back where we were (by event, since releasing data can add steps), or at the start
-    this.goTo(o.atSeq ? this.steps.filter((st) => st.seq <= o.atSeq).length : 0);
+    this.goTo(o.atSequence ? this.steps.filter((st) => st.sequence <= o.atSequence).length : 0);
   }
 
   // ---------------------------------------------------------------- moving through the steps
@@ -109,11 +110,11 @@ export class ReplayScreen extends TableScreen {
 
   /** The table talk and announcements as they stood after step i, in the order they happened. */
   rebuildLog(i) {
-    const items = (this.state.messages || []).map((m) => ({ kind: "message", msg: m, seq: m.seq }));
+    const items = (this.state.messages || []).map((m) => ({ kind: "message", msg: m, sequence: m.sequence }));
     for (const st of this.steps.slice(0, i)) {
-      if (st.announce) items.push({ kind: "announce", text: this.text.t(st.announce.text), seq: st.seq, type: st.event_type });
+      if (st.announce) items.push({ kind: "announce", text: this.text.t(st.announce.text), sequence: st.sequence, type: st.event_type });
     }
-    return items.sort((a, b) => a.seq - b.seq).slice(-200);
+    return items.sort((a, b) => a.sequence - b.sequence).slice(-200);
   }
 
   play() {
@@ -170,7 +171,7 @@ export class ReplayScreen extends TableScreen {
       tools.push(pick);
     }
     tools.push(h("button.ghost", { onclick: () => openDisclosures(this.app, this.id, r.number,
-      { seatName: (n) => this.seatName(n), after: () => this.app.openReplay(this.id, r.number, { ...this.opts, atSeq: this.steps[this.pos - 1]?.seq }) }) }, "Hidden data"));
+      { seatName: (n) => this.seatName(n), after: () => this.app.openReplay(this.id, r.number, { ...this.opts, atSequence: this.steps[this.pos - 1]?.sequence }) }) }, "Hidden data"));
     if (r.journal?.length) tools.push(h("button.ghost", { onclick: () => this.showJournal() }, "Journal"));
     if (this.scene) tools.push(h("button.ghost", { onclick: () => { this.showGrid = !this.showGrid; this.renderScene(); }, title: "Show or hide the grid" }, "Grid"));
     clear(this.header,
@@ -195,7 +196,7 @@ export class ReplayScreen extends TableScreen {
       h("button.ghost", { onclick: () => { this.pause(); this.goTo(this.pos + 1, true); }, title: "One step forward (→)", "aria-label": "One step forward" }, "▶"),
       h("button.ghost", { onclick: () => { this.pause(); this.goTo(n); }, title: "To the end", "aria-label": "To the end" }, "⏭"),
       slider, speed,
-      h("span.muted.small.where", {}, this.pos ? `Step ${this.pos} of ${n} · event ${step.seq}` : `The start · ${n} steps`));
+      h("span.muted.small.where", {}, this.pos ? `Step ${this.pos} of ${n} · event ${step.sequence}` : `The start · ${n} steps`));
   }
 
   /** What happened at this step: the event, who did it, where its outcome came from, and what it was. */

@@ -19,7 +19,7 @@ export class Net extends EventTarget {
     this.mode = null;               // "websocket" or "webrtc"
     this.pending = new Map();
     this.nextId = 1;
-    this.clientSeq = Date.now() % 1000000;
+    this.clientSequence = Date.now() % 1000000;
     this.welcome = null;
     this.frameHandlers = new Set();
     this.open = false;
@@ -267,18 +267,18 @@ export class Net extends EventTarget {
     });
   }
 
-  action(tableId, actionType, params = {}, windowSeq) {
-    const clientSeq = ++this.clientSeq;
+  action(tableId, actionType, params = {}, windowSequence) {
+    const clientSequence = ++this.clientSequence;
     return new Promise((resolve) => {
       const onAck = (ev) => {
-        if (ev.detail.client_seq === clientSeq) {
+        if (ev.detail.client_sequence === clientSequence) {
           this.removeEventListener("ack", onAck);
           resolve(ev.detail);
         }
       };
       this.addEventListener("ack", onAck);
-      this.send({ type: "action", table_id: tableId, client_seq: clientSeq, action_type: actionType, params,
-                  ...(windowSeq != null ? { window_seq: windowSeq } : {}) });
+      this.send({ type: "action", table_id: tableId, client_sequence: clientSequence, action_type: actionType, params,
+                  ...(windowSequence != null ? { window_sequence: windowSequence } : {}) });
     });
   }
 
