@@ -173,10 +173,15 @@ dialog footer { display: flex; gap: 8px; justify-content: flex-end; padding: 12p
 .seat-strip { display: flex; gap: 8px; padding: 8px 16px; overflow-x: auto; background: var(--bg-2); border-bottom: 1px solid var(--line); }
 .seat-card { flex: 0 0 auto; min-width: 150px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
 .seat-card.me { border-color: var(--accent); }
-.seat-card.turn { box-shadow: 0 0 0 2px var(--turn); }
+.seat-card.turn { box-shadow: 0 0 0 3px var(--turn); background: color-mix(in srgb, var(--turn) 16%, var(--panel)); }
+.badge.turn { background: var(--turn); border-color: var(--turn); color: #1d1a12; margin-right: 4px; }
 .seat-card.vacant { opacity: 0.6; border-style: dashed; }
 .seat-name { font-weight: 600; white-space: nowrap; }
 .seat-meta { font-size: 0.8em; color: var(--muted); }
+/* seat values beside a seat's name: "Phase 3", "Score 45" */
+.seat-values { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.seat-value { font-size: 0.8em; padding: 1px 6px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; }
+button.seat-value { min-height: 0; line-height: 1.4; }
 .seat-rating { font: 600 0.85em var(--font-mono); color: var(--accent); }
 .seat-ready { font-size: 0.75em; color: var(--muted); } .seat-ready.yes { color: var(--good); font-weight: 600; }
 .table-body { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 340px; min-height: 0; }
@@ -225,8 +230,13 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .scene .place-hit { fill: transparent; }
 .scene .fan-card { cursor: grab; }
 .scene .fan-card.dragging { cursor: grabbing; pointer-events: none; filter: drop-shadow(0 8px 12px rgb(0 0 0 / 0.5)); }
+/* one of the viewer's own pending cards: played, but held back until they commit */
+.scene .fan-card.pending { opacity: 0.5; }
 .scene .insert-marker { stroke: #f0d79a; stroke-width: 5; stroke-linecap: round; pointer-events: none; }
 .scene .placemat-frame { pointer-events: none; }
+/* the ring that lights a placemat on its seat's turn */
+.scene .placemat-turn { fill: none; stroke: var(--turn); stroke-width: 6; opacity: 0; pointer-events: none; }
+.scene .placemat.turn .placemat-turn { opacity: 0.95; filter: drop-shadow(0 0 10px var(--turn)); }
 .scene .scene-label { fill: #f0e6cc; font: 600 20px var(--font-ui); paint-order: stroke; stroke: rgb(0 0 0 / 0.4); stroke-width: 3px; pointer-events: none; }
 .scene .mark { fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .scene .mark.personal { stroke-dasharray: 2 6; }
@@ -238,12 +248,33 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .scene .missing { opacity: 0.3; }
 
 /* hand */
+.hand-values { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.hand-value { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hand-value-name { color: var(--muted); }
+.hand-value-number { font-size: 1.15em; }
+.hand-value-text { font-style: italic; }
+.value-step { min-width: 2em; padding: 0 6px; }
+.score-sheet { border-collapse: collapse; min-width: 240px; }
+.score-sheet th, .score-sheet td { padding: 3px 10px; text-align: right; border-bottom: 1px solid var(--line); }
+.score-sheet tfoot th { border-bottom: 0; }
 .hand-head { display: flex; align-items: baseline; gap: 10px; }
 .hand-head h3 { margin: 0; }
 .hand-cards { display: flex; gap: 0; padding: 10px 6px 4px; overflow-x: auto; }
-.hand-card { flex: 0 0 auto; width: 92px; margin-right: -22px; transition: transform 0.15s, margin 0.15s; cursor: grab; filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.25)); }
+.hand-card { flex: 0 0 auto; width: 92px; margin-right: -22px; transition: transform 0.15s, margin 0.15s, filter 0.4s; cursor: grab; filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.25)); }
 .hand-card:hover { transform: translateY(-14px); margin-right: 4px; z-index: 2; }
+/* A card that just came into the viewer's hand: raised, with an accent outline that follows the card's shape. */
+.hand-card.new { transform: translateY(-8px); filter: drop-shadow(0 0 1.5px var(--accent)) drop-shadow(0 0 1.5px var(--accent)) drop-shadow(0 2px 3px rgb(0 0 0 / 0.25)); }
+.hand-card.new:hover { transform: translateY(-14px); }
 .hand-card .card-svg { width: 100%; height: auto; display: block; }
+/* A card dragged off the board: the hand panel lights up to take it, and a picture of the card follows the pointer
+   once it leaves the board (which clips the card itself). */
+.hand-panel { position: relative; }
+.hand-panel.drop-ready { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.hand-panel.drop-over { background: var(--panel-2); outline-style: solid; }
+.hand-panel.drop-ready::after { content: "Drop here to take it into your hand"; position: absolute; top: 8px; right: 14px; font-weight: 600; color: var(--accent); pointer-events: none; }
+.drag-ghost { position: fixed; width: 78px; transform: translate(-50%, -50%); pointer-events: none; z-index: 50; opacity: 0.9; filter: drop-shadow(0 8px 12px rgb(0 0 0 / 0.5)); }
+.drag-ghost[hidden] { display: none; }
+.drag-ghost .card-svg { width: 100%; height: auto; display: block; }
 .place-list { list-style: none; margin: 0; padding: 0; }
 .place-list li { display: grid; grid-template-columns: 1fr auto; gap: 4px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .mini-cards { grid-column: 1 / -1; display: flex; gap: 4px; flex-wrap: wrap; }
@@ -333,8 +364,14 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 /* the hand view: one column, just this seat's part of the table */
 .table-body.hand-only { grid-template-columns: minmax(0, 1fr); }
 .table-main.view-hand { width: min(860px, 100%); margin: 0 auto; }
-.turn-line { margin: 0; font-weight: 600; color: var(--muted); }
+/* whose turn it is: in every header and the hand view; the viewer's own turn reads as a lit pill */
+.turn-line { margin: 0; font-weight: 600; color: var(--muted); display: inline-flex; align-items: center; gap: 8px; }
+.turn-line[hidden] { display: none; }
 .turn-line.mine { color: var(--accent); }
+.turn-line.mine .turn-text { background: var(--turn); color: #1d1a12; padding: 2px 12px; border-radius: 999px; }
+.table-head .turn-line { color: #e6dcc3; white-space: nowrap; }
+.turn-line button.chime { padding: 0 4px; line-height: 1; }
+.turn-line .pending-text:empty { display: none; }
 .chat-fold { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
 .chat-fold > summary { padding: 10px 14px; cursor: pointer; font-weight: 600; }
 .chat-fold > .chat-panel { border: 0; border-top: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); }
@@ -348,6 +385,22 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .table-main.view-both > .hand-panel { padding: 8px 12px; }
 .table-main.view-both > .hand-panel .hand-card { width: 78px; }
 .table-main.view-both > .state-panel { flex: 1 1 auto; overflow: auto; }
+/* the header tucked away in the combined view: one slim row (name, status, whose turn, the view switch, Show), and
+   the seat strip hidden, so the board gets the room */
+.table-head.tucked { padding: 4px 16px; gap: 6px 14px; flex-wrap: nowrap; }
+.table-head.tucked .tucked-title { display: flex; align-items: baseline; gap: 10px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; }
+.table-head.tucked h1 { font-size: 1rem; overflow: hidden; text-overflow: ellipsis; }
+.table-head.tucked .turn-line { color: #b9c7ba; font-size: 0.9em; }
+.table-head.tucked .turn-line.mine { color: #1d1a12; }
+.table-head.tucked button { padding-top: 3px; padding-bottom: 3px; }
+.table-head button.tuck { white-space: nowrap; }
+.seat-strip[hidden] { display: none; }
+@media (max-width: 520px) {
+  .table-head.tucked .segmented { width: auto; }
+  .table-head.tucked .tucked-title h1, .table-head.tucked .tucked-title .muted { display: none; }
+  .table-head.tucked { padding-left: 8px; padding-right: 8px; gap: 6px; }
+  .table-head.tucked button { padding-left: 8px; padding-right: 8px; }
+}
 .scene .cue { animation: cue 2.5s ease-out forwards; pointer-events: none; }
 .scene foreignObject.video, .scene-video { pointer-events: none; }
 .scene-video { display: block; width: 100%; height: 100%; object-fit: contain; }

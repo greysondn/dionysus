@@ -4,12 +4,21 @@ import { FileCache } from "./cache.js";
 import { CodeError, TARGET_CHARS, decode } from "./handshake.js";
 import { Net } from "./net.js";
 import { ReplayScreen } from "./replay.js";
+import { sha256Hex } from "./softcrypto.js";
 import { TableScreen } from "./table.js";
 import { Text } from "./text.js";
 import { bytes, clear, dialog, formatTime, h, toast } from "./ui.js";
 
 const TOKEN = "dionysus.session";               // one session per server: dionysus.session.<server_id>
 const KEY = "dionysus.redial";                  // a reconnect key and the details to re-dial, per server: dionysus.redial.<server_id>
+
+// Uploads: the bytes in each chunk, the frame header before them (the
+// frame type, the 16-byte upload id and the 8-byte offset), how much may
+// sit in the send buffer before waiting, and how long each wait is.
+const UPLOAD_CHUNK_BYTES = 16384;
+const UPLOAD_HEADER_BYTES = 25;
+const UPLOAD_BUFFERED_MAX = 1 << 20;
+const UPLOAD_WAIT_MS = 20;
 const REDIAL_WAITS_MS = [0, 2000, 5000, 10000, 15000];   // after a drop: when to try re-dialing, before asking for an invite
 const DEFAULT_CONFIG = { stun_servers: ["stun:stun.l.google.com:19302"] };
 
@@ -529,22 +538,55 @@ class App {
     }
   }
 
+  /**
+   * Upload a file to the server in chunks on the bulk channel.
+   *
+   * @param {File} file the file to upload
+   * @param {object} opts more fields for uploads.begin
+   * @returns {Promise<object>} the server's answer to uploads.finish
+   */
   async upload(file, opts) {
-    const buf = new Uint8Array(await file.arrayBuffer());
-    const sha = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", buf)), (b) => b.toString(16).padStart(2, "0")).join("");
-    const r = await this.net.request("uploads.begin", { name: file.name, mime: file.type || undefined, size: buf.length, sha256: sha, ...opts });
-    const id = Uint8Array.from(r.upload_id.match(/../g).map((x) => parseInt(x, 16)));
-    for (let off = 0; off < buf.length; off += 16384) {
-      const chunk = buf.subarray(off, off + 16384);
-      const frame = new Uint8Array(25 + chunk.length);
-      frame[0] = r.frame_type;
-      frame.set(id, 1);
-      new DataView(frame.buffer).setBigUint64(17, BigInt(off));
-      frame.set(chunk, 25);
-      this.net.sendBinary(frame);
-      while (this.net.bufferedAmount > 1 << 20) await new Promise((res) => setTimeout(res, 20));
+    const bytesIn = new Uint8Array(await file.arrayBuffer());
+    let mime = undefined;
+    let offset = 0;
+
+    // Name the file by its hash and open the upload.
+    const sha = await sha256Hex(bytesIn);
+    if (file.type !== "") {
+      mime = file.type;
     }
-    return this.net.request("uploads.finish", { upload_id: r.upload_id, asset_key: file.name.replace(/\.[^.]+$/, "") });
+    const begun = await this.net.request(
+      "uploads.begin",
+      { name: file.name, mime, size: bytesIn.length, sha256: sha, ...opts },
+    );
+    const id = Uint8Array.from(
+      begun.upload_id.match(/../g).map((x) => parseInt(x, 16)),
+    );
+
+    // Send the chunks, waiting whenever too much is still buffered.
+    while (offset < bytesIn.length) {
+      const chunk = bytesIn.subarray(offset, offset + UPLOAD_CHUNK_BYTES);
+      const frame = new Uint8Array(UPLOAD_HEADER_BYTES + chunk.length);
+      frame[0] = begun.frame_type;
+      frame.set(id, 1);
+      new DataView(frame.buffer).setBigUint64(17, BigInt(offset));
+      frame.set(chunk, UPLOAD_HEADER_BYTES);
+      this.net.sendBinary(frame);
+      while (this.net.bufferedAmount > UPLOAD_BUFFERED_MAX) {
+        await new Promise(
+          (resolve) => setTimeout(resolve, UPLOAD_WAIT_MS),
+        );
+      }
+      offset += UPLOAD_CHUNK_BYTES;
+    }
+
+    return this.net.request(
+      "uploads.finish",
+      {
+        upload_id: begun.upload_id,
+        asset_key: file.name.replace(/\.[^.]+$/, ""),
+      },
+    );
   }
 
   // ---------------------------------------------------------------- inviting players (the host's half of the handshake)

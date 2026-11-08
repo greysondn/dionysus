@@ -3,7 +3,14 @@
 // token sends an action, and the token moves only when the server's patch says so.
 import { fanLayout, insertIndex, insertMarker, resolveLook } from "./fan.js";
 import { toScene, turnBack, turnedBox, turnTransform } from "./facing.js";
+import { takeIntoHand } from "./hand.js";
 import { referenceString } from "./layout.js";
+import {
+  hintText,
+  myPending,
+  pendingEntity,
+  pendingView,
+} from "./pending.js";
 import {
   fillText,
   matRotation,
@@ -11,10 +18,28 @@ import {
   readPath,
   seatPath,
 } from "./placemats.js";
+import { holeText, valueDeclarations } from "./seatvalues.js";
+import { turnSeat } from "./turn.js";
 import { h, s, toast } from "./ui.js";
 
 /** px a fan's drop area reaches past each of its ends. */
 const FAN_OVERHANG = 24;
+
+/** A grid's cell size, in px, when it doesn't say. */
+const DEFAULT_CELL_SIZE = 70;
+
+/** The share of a cell left empty on each side of a token that fits its
+ * cell, when neither the token nor the grid says. */
+const DEFAULT_FIT_MARGIN = 0.1;
+
+/** px between a placemat and the ring that lights it on its seat's turn. */
+const TURN_RING_GAP = 8;
+
+/** The hover hint on one of the viewer's own pending cards. */
+const PENDING_HINT = (
+  "Pending: only you see it until you commit the play." +
+  " Drag it onto your hand, or right-click, to take it back."
+);
 
 /** This viewer's volume for a channel (ambience, music, effects), 0 to 1. */
 export function channelVolume(channel) {
@@ -385,9 +410,24 @@ export class SceneView {
    */
   drawPlaceAt(g, spec) {
     const contents = this.tree?.places?.[spec.placeId];
+    const entries = myPending(this.tree, this.app.seat);
+    const held = new Map();
+
+    // A fan shows the viewer's own pending cards for it, faded, where
+    // they will land.
+    for (const entry of entries) {
+      if (entry.to === spec.placeId) {
+        held.set(entry.token, entry);
+      }
+    }
 
     if ((spec.look.mode !== "stack") && (Array.isArray(contents))) {
-      this.drawFan(g, spec, contents);
+      this.drawFan(
+        g,
+        spec,
+        pendingView(contents, entries, spec.placeId),
+        held,
+      );
     } else {
       this.drawStack(g, spec, contents);
     }
@@ -563,9 +603,12 @@ export class SceneView {
    *
    * @param {SVGGElement} g the group to draw into
    * @param {object} spec the place, as drawPlaceAt takes it
-   * @param {string[]} ids the tokens it holds, in order
+   * @param {string[]} ids the tokens it holds, in order, with the
+   *   viewer's pending ones set in
+   * @param {Map<string, object>} [held] the viewer's pending entries for
+   *   it, by token: those cards are drawn faded
    */
-  drawFan(g, spec, ids) {
+  drawFan(g, spec, ids, held = new Map()) {
     const look = spec.look;
     const [slotW, slotH] = look.slot;
     const layout = fanLayout(look, ids.length);
@@ -573,6 +616,7 @@ export class SceneView {
     const first = fanLayout(look, 1).slots[0];
     const caption = this.placeCaption(spec, ids.length);
     const reach = this.fanReach(look, layout);
+    const hint = this.takeHint(true);
     let ent = null;
     let card = null;
 
@@ -589,10 +633,11 @@ export class SceneView {
       }));
     }
 
-    // Each token, in drawing order.
+    // Each token, in drawing order; a pending one faded, showing the
+    // side it was played with.
     for (const i of layout.order) {
       ent = this.tree.entities?.[ids[i]];
-      if (ent) {
+      if (ent != null) {
         card = s("g", {
           class: "fan-card",
           "data-token": ids[i],
@@ -600,10 +645,20 @@ export class SceneView {
           transform: `translate(${layout.slots[i].x} ${layout.slots[i].y})` +
             ` scale(${layout.scale})`,
         });
+        if (held.has(ids[i])) {
+          ent = pendingEntity(ent, held.get(ids[i]));
+          card.classList.add("pending");
+          card.dataset.pending = "1";
+        }
         this.appendCentered(card, ent, slotW, slotH);
         card.append(s("rect", {
           class: "token-hit", width: slotW, height: slotH, rx: 6,
         }));
+        if (held.has(ids[i])) {
+          card.append(s("title", {}, PENDING_HINT));
+        } else if (hint !== "") {
+          card.append(s("title", {}, hint));
+        }
         box.append(card);
       }
     }
@@ -706,9 +761,13 @@ export class SceneView {
     });
     let declaration = null;
 
-    // Its own, when it is the viewer's.
+    // Its own, when it is the viewer's, and lit while it is its seat's
+    // turn.
     if (String(this.app.seat) === seat) {
       group.classList.add("mine");
+    }
+    if (String(turnSeat(this.tree)) === seat) {
+      group.classList.add("turn");
     }
 
     // Its frame: a picture, a drawn box, or both.
@@ -739,6 +798,16 @@ export class SceneView {
     for (const label of mat.labels || []) {
       this.drawLabel(group, label, seat, false);
     }
+
+    // The ring that lights it on its seat's turn, over everything in it.
+    group.append(s("rect", {
+      class: "placemat-turn",
+      x: -TURN_RING_GAP,
+      y: -TURN_RING_GAP,
+      width: mat.width + (2 * TURN_RING_GAP),
+      height: mat.height + (2 * TURN_RING_GAP),
+      rx: TURN_RING_GAP,
+    }));
 
     g.append(group);
   }
@@ -830,6 +899,18 @@ export class SceneView {
       } else if (value?.count != null) {
         ret = String(value.count);
       }
+    } else if (name.startsWith("hint:")) {
+      // The hint the rules set for a place, or nothing.
+      ret = hintText(this.tree, seatPath(name.slice(5), seat));
+    } else if ((name.startsWith("value:")) || (name.startsWith("text:"))) {
+      // A seat value, or the string its texts map it to.
+      ret = holeText(
+        this.tree || {},
+        valueDeclarations(this.look.declaration),
+        name,
+        seat,
+        (key) => this.app.text.t(key),
+      );
     } else if (bind[name] != null) {
       value = readPath(this.tree || {}, seatPath(bind[name], seat));
       if ((typeof value === "string") || (typeof value === "number")) {
@@ -914,33 +995,105 @@ export class SceneView {
     return ret;
   }
 
+  /**
+   * Draw the tokens on the table in this scene, lowest first.
+   *
+   * @param {SVGGElement} g the group to draw into
+   * @param {object} tree the state
+   */
   drawTokens(g, tree) {
     const here = this.scene.scene_key;
-    const ents = Object.entries(tree?.entities || {}).filter(([, e]) => e && e.x != null && (e.scene == null || e.scene === here))
-      .sort((a, b) => (a[1].z || 0) - (b[1].z || 0));
-    for (const [id, ent] of ents) {
-      let { node, w, h: hh } = this.look.drawEntity(ent);
-      const token = this.look.tokens.get(ent.kind);
-      const grid = this.scene.grid || {};
-      if (token?.fit === "cell" && grid.kind && grid.kind !== "none" && w && hh) {
-        // drawn to fill its cell less the margin on each side, keeping its aspect ratio; drawing only
-        const margin = token.fit_margin ?? grid.fit_margin ?? 0.1;
-        const k = ((grid.cell_size || 70) * (1 - 2 * margin)) / Math.max(w, hh);
-        const scaled = s("g", { transform: `scale(${k})` });
-        scaled.append(node);
-        node = scaled; w *= k; hh *= k;
+    const ents = [];
+
+    // The tokens on the table (they have a position) in this scene, or
+    // in no scene at all.
+    for (const [id, ent] of Object.entries(tree?.entities || {})) {
+      if (
+        (ent != null) &&
+        (ent.x != null) &&
+        ((ent.scene == null) || (ent.scene === here))
+      ) {
+        ents.push([id, ent]);
       }
-      const ax = (token?.anchor_x ?? 0.5) * w, ay = (token?.anchor_y ?? 0.5) * hh;
-      // turned back about its anchor as its reorient asks, then its own rotation on the board
-      const back = turnBack(this.turn || 0, this.reorientOf(token));
-      const wrap = s("g", { class: "token", "data-token": id,
-        transform: `translate(${ent.x - ax} ${ent.y - ay}) rotate(${back + (ent.rotation || 0)} ${ax} ${ay})` });
-      if (ent.owner === this.app.seat) wrap.classList.add("mine");
-      if (ent.hidden && ent.owner === this.app.seat) wrap.classList.add("peek");
-      wrap.append(node);
-      wrap.append(s("rect", { class: "token-hit", width: w, height: hh, rx: 6 }));
-      g.append(wrap);
     }
+
+    // Draw them in their order on the table.
+    ents.sort((a, b) => (a[1].z || 0) - (b[1].z || 0));
+    for (const [id, ent] of ents) {
+      g.append(this.tokenNode(id, ent));
+    }
+  }
+
+  /**
+   * One token on the table: drawn at its position, turned back about its
+   * anchor as its reorient asks, then turned by its own rotation on the
+   * board. A token that fits its cell is drawn to fill it.
+   *
+   * @param {string} id the token's id
+   * @param {object} ent the token's entity
+   * @returns {SVGGElement} the token's group
+   */
+  tokenNode(id, ent) {
+    const token = this.look.tokens.get(ent.kind);
+    const grid = this.scene.grid || {};
+    const back = turnBack(this.turn || 0, this.reorientOf(token));
+    const rotation = back + (ent.rotation || 0);
+    const hint = this.takeHint(false);
+    let { node, w, h: hh } = this.look.drawEntity(ent);
+    let margin = 0;
+    let k = 0;
+    let scaled = null;
+    let ax = 0;
+    let ay = 0;
+    let ret = null;
+
+    // Fill its cell less the margin on each side, keeping its aspect
+    // ratio, when it fits its cell. This is drawing only.
+    if (
+      (token?.fit === "cell") &&
+      (grid.kind != null) &&
+      (grid.kind !== "") &&
+      (grid.kind !== "none") &&
+      (w > 0) &&
+      (hh > 0)
+    ) {
+      margin = token.fit_margin ?? grid.fit_margin ?? DEFAULT_FIT_MARGIN;
+      k = ((grid.cell_size || DEFAULT_CELL_SIZE) * (1 - 2 * margin)) /
+        Math.max(w, hh);
+      scaled = s("g", { transform: `scale(${k})` });
+      scaled.append(node);
+      node = scaled;
+      w *= k;
+      hh *= k;
+    }
+
+    // Its anchor, and its group, placed and turned.
+    ax = (token?.anchor_x ?? 0.5) * w;
+    ay = (token?.anchor_y ?? 0.5) * hh;
+    ret = s("g", {
+      class: "token",
+      "data-token": id,
+      transform: `translate(${ent.x - ax} ${ent.y - ay})` +
+        ` rotate(${rotation} ${ax} ${ay})`,
+    });
+
+    // Marked when it is the viewer's, and when they may peek at it.
+    if (ent.owner === this.app.seat) {
+      ret.classList.add("mine");
+    }
+    if ((ent.hidden) && (ent.owner === this.app.seat)) {
+      ret.classList.add("peek");
+    }
+
+    // The drawing, the area that catches the pointer, and the hint on
+    // how to take it.
+    ret.append(node);
+    ret.append(s("rect", { class: "token-hit", width: w, height: hh, rx: 6 }));
+    if (hint !== "") {
+      ret.append(s("title", {}, hint));
+    }
+
+    return ret;
   }
 
   drawMarks(g, tree) {
@@ -1163,6 +1316,7 @@ export class SceneView {
       ent: null,
       control: this.control("tabletop.play"),
       fromPlace: card.closest(".place")?.dataset.place,
+      isPending: (card.dataset.pending === "1"),
       moved: false,
       base: card.getAttribute("transform"),
     };
@@ -1213,6 +1367,11 @@ export class SceneView {
       d.node.setAttribute("transform", `translate(${dx} ${dy}) ${d.base}`);
       d.node.classList.add("dragging");
       this.showMarker(e);
+
+      // Offer the hand panel as a place to drop it, when it may go there.
+      if ((d.moved) && (this.takesToHand(d))) {
+        this.app.dragFromBoard(e, this.tree.entities?.[d.id]);
+      }
     }
   }
 
@@ -1311,9 +1470,10 @@ export class SceneView {
   }
 
   /**
-   * Put down a dragged token: by the rules' own move (it says where, and
-   * checks it), into the place under the pointer, or on the table where
-   * it was let go. A refused move puts it back.
+   * Put down a dragged token: into the viewer's hand when it was let go
+   * on the hand panel, by the rules' own move (it says where, and checks
+   * it), into the place under the pointer, or on the table where it was
+   * let go. A refused move puts it back.
    *
    * @param {PointerEvent} e the release
    * @param {object} d the drag
@@ -1322,9 +1482,16 @@ export class SceneView {
     const p = this.pt(e);
     const placeEl = placeAt(e);
     const index = this.dropIndex(e, placeEl);
+    let hand = null;
     let x = 0;
     let y = 0;
     let ack = null;
+
+    // The hand place it was let go on, when it may go there.
+    if (this.takesToHand(d)) {
+      hand = this.app.handDropAt(e);
+    }
+    this.app.endDragFromBoard();
 
     // Where it was let go: a fan's card at the pointer, a token where
     // it started plus how far it went.
@@ -1338,7 +1505,9 @@ export class SceneView {
     }
 
     // Say where it goes.
-    if (d.fromPlace != null) {
+    if (hand != null) {
+      ack = await this.takeToHand(d, hand);
+    } else if (d.fromPlace != null) {
       ack = await this.playCard(d, placeEl, index, x, y);
     } else if (d.control.action_type !== "tabletop.move") {
       ack = await this.app.act(
@@ -1364,8 +1533,58 @@ export class SceneView {
   }
 
   /**
+   * Whether a drag may end in the viewer's hand: a card out of a place on
+   * the board, which is played into the hand, or a token loose on the
+   * table that the free tabletop moves and lets be taken.
+   *
+   * @param {object} d the drag
+   * @returns {boolean} whether it may
+   */
+  takesToHand(d) {
+    let ret = false;
+
+    if (d.fromPlace != null) {
+      ret = (this.control("tabletop.play") != null);
+    } else {
+      ret = (
+        (d.control.action_type === "tabletop.move") &&
+        (this.control("tabletop.take") != null)
+      );
+    }
+
+    return ret;
+  }
+
+  /**
+   * Take a dragged card into a place in the viewer's hand: a take for a
+   * token loose on the table, a play for a card out of a place, and
+   * taking back a pending card.
+   *
+   * @param {object} d the drag
+   * @param {string} hand the hand place it goes into
+   * @returns {Promise<object>} the server's answer, or a refusal when
+   *   the card is already there
+   */
+  takeToHand(d, hand) {
+    const request = takeIntoHand(
+      d.id,
+      d.fromPlace ?? null,
+      hand,
+      d.isPending === true,
+    );
+    let ret = Promise.resolve({ outcome: "unchanged" });
+
+    if (request != null) {
+      ret = this.app.act(request.action, request.params);
+    }
+
+    return ret;
+  }
+
+  /**
    * Play a card dragged out of a fan: into the place it was let go on,
-   * at the position under the pointer, or onto the table there.
+   * at the position under the pointer, or onto the table there. A
+   * pending card goes back only to the hand, so anywhere else it stays.
    *
    * @param {object} d the drag
    * @param {Element|undefined} placeEl the place under the pointer
@@ -1377,7 +1596,9 @@ export class SceneView {
   playCard(d, placeEl, index, x, y) {
     let ret = null;
 
-    if (placeEl) {
+    if (d.isPending === true) {
+      ret = Promise.resolve({ outcome: "unchanged" });
+    } else if (placeEl) {
       ret = this.app.act("tabletop.play", withIndex({
         token: d.id, to: placeEl.dataset.place, face_up: true,
       }, index));
@@ -1404,19 +1625,143 @@ export class SceneView {
     else if (this.control("tabletop.flip")) this.app.act("tabletop.flip", { token: id });
   }
 
+  /**
+   * A token's menu, on a right-click: flip, roll, rotate, take it into
+   * the hand, and for a GM speak as it; or the menu of a card in a place
+   * on the board. The table view only watches.
+   *
+   * @param {MouseEvent} e the contextmenu event
+   */
   onContext(e) {
     const id = this.tokenAt(e);
-    if (!id || this.app.view === "table") return;
-    e.preventDefault();
-    const ent = this.tree.entities[id];
-    const token = this.look.tokens.get(ent?.kind);
+    const card = e.target.closest?.(".fan-card");
     const items = [];
-    if (this.control("tabletop.flip") && (token?.sides?.length > 1 || ent.hidden)) items.push(["Flip", () => this.app.act("tabletop.flip", { token: id })]);
-    if (this.control("tabletop.roll") && token?.roll) items.push(["Roll", () => this.app.act("tabletop.roll", { token: id })]);
-    if (this.control("tabletop.rotate")) items.push(["Rotate 90°", () => this.app.act("tabletop.rotate", { token: id, rotation: (ent.rotation || 0) + 90 })]);
-    if (this.control("tabletop.take")) items.push(["Take into my hand", () => this.app.act("tabletop.take", { token: id })]);
-    if (this.app.isGM() && this.app.feature("messages")) items.push(["Speak as this…", () => this.app.speakAs(id)]);
+    let ent = null;
+    let token = null;
+
+    if ((id != null) && (id !== "") && (this.app.view !== "table")) {
+      // The token, and its kind.
+      e.preventDefault();
+      ent = this.tree.entities[id];
+      token = this.look.tokens.get(ent?.kind);
+
+      // What may be done with it.
+      if (
+        (this.control("tabletop.flip")) &&
+        ((token?.sides?.length > 1) || (ent.hidden))
+      ) {
+        items.push([
+          "Flip",
+          () => this.app.act("tabletop.flip", { token: id }),
+        ]);
+      }
+      if ((this.control("tabletop.roll")) && (token?.roll)) {
+        items.push([
+          "Roll",
+          () => this.app.act("tabletop.roll", { token: id }),
+        ]);
+      }
+      if (this.control("tabletop.rotate")) {
+        items.push([
+          "Rotate 90°",
+          () => this.app.act("tabletop.rotate", {
+            token: id,
+            rotation: (ent.rotation || 0) + 90,
+          }),
+        ]);
+      }
+      if (this.control("tabletop.take")) {
+        items.push([
+          "Take into my hand",
+          () => this.app.act("tabletop.take", { token: id }),
+        ]);
+      }
+      if ((this.app.isGM()) && (this.app.feature("messages"))) {
+        items.push(["Speak as this…", () => this.app.speakAs(id)]);
+      }
+
+      this.app.menu(e.clientX, e.clientY, items);
+    }
+
+    // A card in a place on the board has a menu of its own.
+    if ((id == null) && (card != null) && (this.app.view !== "table")) {
+      this.cardMenu(e, card);
+    }
+  }
+
+  /**
+   * The menu of a card in a place on the board (a row, a fan, the
+   * discard), on a right-click: take it into the viewer's hand, or take
+   * back one of the viewer's own pending cards.
+   *
+   * @param {MouseEvent} e the contextmenu event
+   * @param {SVGGElement} card the card's group
+   */
+  cardMenu(e, card) {
+    const hand = this.app.handPlaces()[0]?.[0];
+    const from = card.closest(".place")?.dataset.place;
+    const isPending = (card.dataset.pending === "1");
+    const items = [];
+    let request = null;
+    let label = "Take into my hand";
+
+    // Where it would go, when the viewer can play cards and has a hand.
+    e.preventDefault();
+    if ((hand != null) && (this.control("tabletop.play") != null)) {
+      request = takeIntoHand(
+        card.dataset.token,
+        from ?? null,
+        hand,
+        isPending,
+      );
+    }
+    if (isPending) {
+      label = "Take back into my hand";
+    }
+
+    // The menu: taking it, when it isn't in the hand already.
+    if (request != null) {
+      items.push([
+        label,
+        () => this.app.act(request.action, request.params),
+      ]);
+    }
     this.app.menu(e.clientX, e.clientY, items);
+  }
+
+  /**
+   * The hover hint on a card on the board: how to take it into the hand.
+   * Nothing when the viewer can't: in the table view, without a seat, with
+   * no hand panel, or when the rules offer no way.
+   *
+   * @param {boolean} isInPlace whether it is in a place on the board, not
+   *   loose on the table
+   * @returns {string} the hint, or "" for none
+   */
+  takeHint(isInPlace) {
+    let ret = "";
+
+    if (
+      (this.app.view === "table") ||
+      (this.app.seat == null) ||
+      (this.app.handPlaces().length === 0)
+    ) {
+      ret = "";
+    } else if ((isInPlace) && (this.control("tabletop.play") != null)) {
+      ret = (
+        "Drag it onto your hand to take it, or onto another place." +
+        " Right-click to take it."
+      );
+    } else if ((!isInPlace) && (this.control("tabletop.take") != null)) {
+      ret = (
+        "Drag it onto your hand to take it." +
+        " Right-click for more."
+      );
+    } else {
+      ret = "";
+    }
+
+    return ret;
   }
 
   /**
