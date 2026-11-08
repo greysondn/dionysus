@@ -503,46 +503,121 @@ export class TableScreen {
 
   // ---------------------------------------------------------------- layout
 
+  /**
+   * Build the table's page for the current view, and fill it.
+   *
+   * The table view is the scene with the table's own panels beside it.
+   * The hand view is one player's part of the table in one column. The
+   * combined view is the scene with the hand below it, and the controls
+   * and the viewer's own seat values at the top of the side panel, so the
+   * hand stays on screen however many controls a game has.
+   */
   layout() {
     const projecting = this.projecting;
+    const main = h("main.table-main", { class: `view-${this.view}` });
+    const side = h("aside.table-side");
+    let logTitle = "Table log";
+    let fold = null;
+
+    // Make the panels every view draws from.
+    if (this.feature("messages")) {
+      logTitle = "Table talk";
+    }
     this.turnEl = null;
     this.header = h("header.table-head");
     this.seatsEl = h("div.seat-strip");
     this.lobbyEl = h("section.lobby-panel");
     this.controlsEl = h("div.controls");
+    this.valuesEl = h("section.values-panel");
     this.handEl = h("section.hand-panel");
     this.placesEl = h("section.places-panel");
     this.stateEl = h("section.state-panel");
     this.logEl = h("div.log");
-    this.chatEl = this.feature("messages") ? h("section.chat-panel", {}, h("h3", {}, "Table talk"), this.logEl, this.composer())
-      : h("section.chat-panel", {}, h("h3", {}, "Table log"), this.logEl);
-    const main = h("main.table-main", { class: `view-${this.view}` });
-    const side = h("aside.table-side");
-    if (this.view === "table") {
-      main.append(this.scene ? this.sceneView.el : this.stateEl);
-      if (this.scene) side.append(this.stateEl);
-      side.append(this.placesEl, this.chatEl);
-    } else if (this.view === "hand") {
-      // one player's private info and controls (spec section 1): whose turn it is, the controls, the hand, the
-      // scores and the seat's own sheets. The table's piles and the board are the table view's; talk is folded away.
-      this.turnEl = h("p.turn-line");
-      this.chatEl.querySelector("h3").remove();
-      const fold = h("details.chat-fold", {}, h("summary", {}, this.feature("messages") ? "Table talk" : "Table log"), this.chatEl);
-      main.append(this.lobbyEl, this.turnEl, this.controlsEl, this.handEl, this.stateEl, fold);
-      clear(this.el, this.header, h("div.table-body.hand-only", {}, main));
-      this.renderAll();
-      return;
+    if (this.feature("messages")) {
+      this.chatEl = h(
+        "section.chat-panel",
+        {},
+        h("h3", {}, logTitle),
+        this.logEl,
+        this.composer(),
+      );
     } else {
-      main.append(this.lobbyEl);
-      if (this.scene) main.append(this.sceneView.el);
-      else main.append(this.stateEl);
-      main.append(this.controlsEl, this.handEl);
-      if (this.scene) side.append(this.stateEl);
-      side.append(this.placesEl, this.chatEl);
+      this.chatEl = h(
+        "section.chat-panel",
+        {},
+        h("h3", {}, logTitle),
+        this.logEl,
+      );
     }
-    clear(this.el, this.header, this.seatsEl, h("div.table-body", {}, main, side));
+
+    // Lay them out for the view.
+    switch (this.view) {
+      case "table":
+        if (this.scene != null) {
+          main.append(this.sceneView.el);
+          side.append(this.stateEl);
+        } else {
+          main.append(this.stateEl);
+        }
+        side.append(this.placesEl, this.chatEl);
+        clear(
+          this.el,
+          this.header,
+          this.seatsEl,
+          h("div.table-body", {}, main, side),
+        );
+        break;
+      case "hand":
+        // One player's private info and controls (spec section 1): whose
+        // turn it is, the controls, the hand, the scores and the seat's own
+        // sheets. The table's piles and the board are the table view's;
+        // talk is folded away.
+        this.turnEl = h("p.turn-line");
+        this.chatEl.querySelector("h3").remove();
+        fold = h(
+          "details.chat-fold",
+          {},
+          h("summary", {}, logTitle),
+          this.chatEl,
+        );
+        main.append(
+          this.lobbyEl,
+          this.turnEl,
+          this.controlsEl,
+          this.valuesEl,
+          this.handEl,
+          this.stateEl,
+          fold,
+        );
+        clear(this.el, this.header, h("div.table-body.hand-only", {}, main));
+        break;
+      default:
+        main.append(this.lobbyEl);
+        if (this.scene != null) {
+          main.append(this.sceneView.el);
+        } else {
+          main.append(this.stateEl);
+        }
+        main.append(this.handEl);
+        side.append(this.controlsEl, this.valuesEl);
+        if (this.scene != null) {
+          side.append(this.stateEl);
+        }
+        side.append(this.placesEl, this.chatEl);
+        clear(
+          this.el,
+          this.header,
+          this.seatsEl,
+          h("div.table-body", {}, main, side),
+        );
+        break;
+    }
+
+    // Fill them, and go back to projecting where the old page was.
     this.renderAll();
-    if (projecting) this.enterProjection();
+    if ((this.view !== "hand") && (projecting)) {
+      this.enterProjection();
+    }
   }
 
   /**
@@ -1526,7 +1601,8 @@ export class TableScreen {
 
   /**
    * The hand panel: each of the viewer's own places that lists its
-   * tokens, as a row of cards.
+   * tokens, as a row of cards. The viewer's own seat values are drawn
+   * along with it, in a panel of their own.
    *
    * Hidden in the table view, for a viewer with no seat, and when there
    * are no such places.
@@ -1534,26 +1610,53 @@ export class TableScreen {
   renderHand() {
     let mine = [];
     let canPlay = false;
-    let values = null;
 
     if (this.handEl != null) {
-      // The places to show, and the viewer's own seat values.
+      // The places to show.
       if ((this.view !== "table") && (this.seat != null)) {
         mine = this.handPlaces();
-        values = this.handValues();
       }
 
       // Hidden when there is nothing to show.
-      if ((mine.length === 0) && (values == null)) {
+      if (mine.length === 0) {
         this.handEl.hidden = true;
       } else {
         this.handEl.hidden = false;
         canPlay = this.controls.some((control) => (
           control.action_type === "tabletop.play"
         ));
-        clear(this.handEl, values, mine.map(([pid, ids]) => (
+        clear(this.handEl, mine.map(([pid, ids]) => (
           this.handBlock(pid, ids, canPlay)
         )));
+      }
+    }
+
+    this.renderValues();
+  }
+
+  /**
+   * The values panel: the viewer's own seat values, with the controls to
+   * change them. It sits above the hand in the hand view, and at the top
+   * of the side panel in the combined view.
+   *
+   * Hidden in the table view, for a viewer with no seat, and when the
+   * game shows no values there.
+   */
+  renderValues() {
+    let values = null;
+
+    if (this.valuesEl != null) {
+      // The viewer's own seat values.
+      if ((this.view !== "table") && (this.seat != null)) {
+        values = this.handValues();
+      }
+
+      // Hidden when there is nothing to show.
+      if (values == null) {
+        this.valuesEl.hidden = true;
+      } else {
+        this.valuesEl.hidden = false;
+        clear(this.valuesEl, values);
       }
     }
   }
@@ -1597,7 +1700,7 @@ export class TableScreen {
   }
 
   /**
-   * The viewer's own seat values, above their hand: each with what its
+   * The viewer's own seat values, for the values panel: each with what its
    * value stands for (phase 3: "1 set of 4 + 1 run of 4") and, where they
    * may edit it, the controls to change it.
    *

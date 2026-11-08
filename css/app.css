@@ -188,7 +188,7 @@ button.seat-value { min-height: 0; line-height: 1.4; }
 .table-main { padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; overflow: auto; min-height: 0; }
 .table-side { border-left: 1px solid var(--line); background: var(--bg-2); padding: 12px; display: flex; flex-direction: column; gap: 12px; overflow: auto; min-height: 0; }
 .table-main.view-table { padding: 0; background: #000; }
-.lobby-panel, .hand-panel, .places-panel, .state-panel, .chat-panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.lobby-panel, .values-panel, .hand-panel, .places-panel, .state-panel, .chat-panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
 .lobby-panel { border-color: var(--accent); }
 .odds ul { margin: 4px 0 0; padding-left: 18px; }
 .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; min-height: 48px; }
@@ -253,6 +253,7 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .hand-value-name { color: var(--muted); }
 .hand-value-number { font-size: 1.15em; }
 .hand-value-text { font-style: italic; }
+.values-panel .hand-values { margin-bottom: 0; }
 .value-step { min-width: 2em; padding: 0 6px; }
 .score-sheet { border-collapse: collapse; min-width: 240px; }
 .score-sheet th, .score-sheet td { padding: 3px 10px; text-align: right; border-bottom: 1px solid var(--line); }
@@ -385,6 +386,19 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .table-main.view-both > .hand-panel { padding: 8px 12px; }
 .table-main.view-both > .hand-panel .hand-card { width: 78px; }
 .table-main.view-both > .state-panel { flex: 1 1 auto; overflow: auto; }
+/* the controls and the viewer's own seat values sit at the top of the side panel in the combined view, where there is
+   room for however many a game has; the big buttons shrink to fit the column */
+.table-side > .controls { gap: 8px; min-height: 0; flex: none; }
+.table-side > .controls:empty { display: none; }
+.table-side > .controls button { flex: 1 1 auto; }
+.table-side > .controls button.big { font-size: 1rem; padding: 8px 14px; min-height: 40px; }
+.table-side > .values-panel { flex: none; padding: 10px 12px; }
+.table-side > .values-panel .hand-value-text { order: 1; flex-basis: 100%; }
+/* in one column the whole body scrolls, so the hand is never clipped and the controls follow right below it */
+@media (max-width: 900px) {
+  .table-body:has(> .view-both) { grid-template-columns: minmax(0, 1fr); align-content: start; overflow: auto; }
+  .table-main.view-both, .view-both + .table-side { overflow: visible; min-height: auto; }
+}
 /* the header tucked away in the combined view: one slim row (name, status, whose turn, the view switch, Show), and
    the seat strip hidden, so the board gets the room */
 .table-head.tucked { padding: 4px 16px; gap: 6px 14px; flex-wrap: nowrap; }
