@@ -74,7 +74,7 @@ export function seatPath(path, seat) {
 }
 
 /**
- * The value at a path ("mechanics/phase10/phase/2") in a state tree.
+ * The value at a path ("mechanics/rules/round/2") in a state tree.
  *
  * @param {object} tree the state
  * @param {string} path the path, its parts split by "/"
@@ -83,6 +83,8 @@ export function seatPath(path, seat) {
 export function readPath(tree, path) {
   let ret = tree;
 
+  // Walk down the tree one part at a time, and stop finding anything
+  // once a part leads somewhere that is not an object.
   for (const part of path.split("/")) {
     if ((ret != null) && (typeof ret === "object")) {
       ret = ret[part];
