@@ -184,7 +184,7 @@ dialog footer { display: flex; gap: 8px; justify-content: flex-end; padding: 12p
 button.seat-value { min-height: 0; line-height: 1.4; }
 .seat-rating { font: 600 0.85em var(--font-mono); color: var(--accent); }
 .seat-ready { font-size: 0.75em; color: var(--muted); } .seat-ready.yes { color: var(--good); font-weight: 600; }
-.table-body { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 340px; min-height: 0; }
+.table-body { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) auto calc(340px * var(--side-scale, 1)); min-height: 0; }
 .table-main { padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; overflow: auto; min-height: 0; }
 .table-side { border-left: 1px solid var(--line); background: var(--bg-2); padding: 12px; display: flex; flex-direction: column; gap: 12px; overflow: auto; min-height: 0; }
 .table-main.view-table { padding: 0; background: #000; }
@@ -398,6 +398,25 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 @media (max-width: 900px) {
   .table-body:has(> .view-both) { grid-template-columns: minmax(0, 1fr); align-content: start; overflow: auto; }
   .table-main.view-both, .view-both + .table-side { overflow: visible; min-height: auto; }
+}
+/* the dividers the viewer drags to resize the panes (panes.js): a thin line with a wider grip around it; each pane
+   scales its contents with CSS zoom by its --*-scale, so they always fit it (the scene fits its box anyway) */
+.pane-divider { flex: none; position: relative; z-index: 3; background: var(--line); touch-action: none; user-select: none; }
+.pane-divider::after { content: ""; position: absolute; inset: -5px 0; }
+.pane-divider.pane-side::after { inset: 0 -5px; }
+.pane-divider:hover, .pane-divider.dragging { background: var(--accent); }
+.pane-head, .pane-hand { height: 3px; cursor: row-resize; }
+.pane-side { width: 3px; cursor: col-resize; }
+.pane-side + .table-side { border-left: 0; }
+.table-main > .pane-hand { margin: -5px 0; border-radius: 2px; }
+.table-main > .pane-hand:has(+ .hand-panel[hidden]) { display: none; }
+.table-head, .seat-strip { zoom: var(--head-scale, 1); }
+.table-side { zoom: var(--side-scale, 1); }
+.table-main.view-both > .hand-panel { zoom: var(--hand-scale, 1); }
+/* one column: no dividers, and every pane at its own size */
+@media (max-width: 900px) {
+  .pane-divider { display: none; }
+  .table-head, .seat-strip, .table-side, .table-main.view-both > .hand-panel { zoom: 1; }
 }
 /* the header tucked away in the combined view: one slim row (name, status, whose turn, the view switch, Show), and
    the seat strip hidden, so the board gets the room */

@@ -29,6 +29,7 @@ import {
   turnSeat,
 } from "./turn.js";
 import { channelVolume, focusStar, playMedia, SceneView } from "./scene.js";
+import { PaneSizer } from "./panes.js";
 import { apply } from "./patch.js";
 import { bytes, clear, dialog, h, s, schemaForm, toast } from "./ui.js";
 
@@ -511,6 +512,10 @@ export class TableScreen {
    * combined view is the scene with the hand below it, and the controls
    * and the viewer's own seat values at the top of the side panel, so the
    * hand stays on screen however many controls a game has.
+   *
+   * In the table and combined views the viewer can drag the lines between
+   * the top bar, the main column, the side panel and the hand to resize
+   * them; each pane's contents scale with it.
    */
   layout() {
     const projecting = this.projecting;
@@ -518,6 +523,7 @@ export class TableScreen {
     const side = h("aside.table-side");
     let logTitle = "Table log";
     let fold = null;
+    let above = null;
 
     // Make the panels every view draws from.
     if (this.feature("messages")) {
@@ -550,6 +556,13 @@ export class TableScreen {
       );
     }
 
+    // The dividers the viewer drags to resize the panes, kept across
+    // layouts.
+    if (this.panes == null) {
+      this.panes = new PaneSizer();
+      this.panes.addEventListener("change", () => this.renderHeader());
+    }
+
     // Lay them out for the view.
     switch (this.view) {
       case "table":
@@ -564,8 +577,16 @@ export class TableScreen {
           this.el,
           this.header,
           this.seatsEl,
-          h("div.table-body", {}, main, side),
+          this.panes.divider("head"),
+          h(
+            "div.table-body",
+            {},
+            main,
+            this.panes.divider("side"),
+            side,
+          ),
         );
+        this.panes.attach(this.el, null, null);
         break;
       case "hand":
         // One player's private info and controls (spec section 1): whose
@@ -594,11 +615,11 @@ export class TableScreen {
       default:
         main.append(this.lobbyEl);
         if (this.scene != null) {
-          main.append(this.sceneView.el);
+          above = this.sceneView.el;
         } else {
-          main.append(this.stateEl);
+          above = this.stateEl;
         }
-        main.append(this.handEl);
+        main.append(above, this.panes.divider("hand"), this.handEl);
         side.append(this.controlsEl, this.valuesEl);
         if (this.scene != null) {
           side.append(this.stateEl);
@@ -608,8 +629,16 @@ export class TableScreen {
           this.el,
           this.header,
           this.seatsEl,
-          h("div.table-body", {}, main, side),
+          this.panes.divider("head"),
+          h(
+            "div.table-body",
+            {},
+            main,
+            this.panes.divider("side"),
+            side,
+          ),
         );
+        this.panes.attach(this.el, this.handEl, above);
         break;
     }
 
@@ -1155,7 +1184,8 @@ export class TableScreen {
 
   /**
    * The table's own tools: projection (in the table view), settings,
-   * sound (when there is any), the journal and the GM's tools.
+   * sound (when there is any), the journal, the GM's tools, and Reset
+   * layout (once the viewer has resized a pane).
    *
    * @returns {Array<HTMLElement>} the tools
    */
@@ -1203,6 +1233,18 @@ export class TableScreen {
         { onclick: () => this.openGMTools() },
         "GM",
       ));
+    }
+
+    // Putting resized panes back, once the viewer has resized one.
+    if (
+      (this.view !== "hand") &&
+      (this.panes != null) &&
+      (this.panes.isChanged())
+    ) {
+      ret.push(h("button.ghost", {
+        onclick: () => this.panes.reset(),
+        title: "Put the panes back at their starting sizes",
+      }, "Reset layout"));
     }
 
     return ret;
