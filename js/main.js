@@ -770,73 +770,805 @@ class App {
 
   // ---------------------------------------------------------------- admin
 
+  /**
+   * Draw the Admin page: plugins, runtime alerts, automatic play, rating
+   * systems, accounts, active tables, ended tables and uploaded media.
+   */
   async admin() {
-    const [plugins, alerts, accounts, ratings, autoplay, media] = await Promise.all(["admin.plugins.list", "admin.alerts", "admin.accounts.list",
-      "admin.ratings.list", "admin.autoplay.status", "admin.media.list"].map((m) => this.net.request(m)));
-    const ended = await this.net.request("tables.list", { ended: true, include_autoplay: true, limit: 200 });
-    const section = (title, ...body) => h("section.admin-section", {}, h("h3", {}, title), body);
-    const gameSel = h("select", {}, this.games.map((g) => h("option", { value: g.game_id }, g.name)));
+    const methods = [
+      "admin.plugins.list",
+      "admin.alerts",
+      "admin.accounts.list",
+      "admin.ratings.list",
+      "admin.autoplay.status",
+      "admin.media.list",
+      "admin.tables.list",
+    ];
+    let replies = [];
+    let ended = null;
+
+    // Ask for everything the page shows.
+    replies = await Promise.all(
+      methods.map((method) => this.net.request(method)),
+    );
+    ended = await this.net.request(
+      "tables.list",
+      { ended: true, include_autoplay: true, limit: 200 },
+    );
+
+    // Draw a section for each.
+    this.shell(
+      "admin",
+      h(
+        "div.admin",
+        {},
+        this.adminPlugins(replies[0]),
+        this.adminAlerts(replies[1]),
+        this.adminAutoplay(replies[4]),
+        this.adminRatings(replies[3]),
+        this.adminAccounts(replies[2]),
+        this.adminActive(replies[6]),
+        this.adminEnded(ended),
+        this.adminMedia(replies[5]),
+      ),
+    );
+  }
+
+  /**
+   * The Plugins section: a rescan button, and a row for each plugin.
+   *
+   * @param {object} plugins the reply to admin.plugins.list
+   * @returns {HTMLElement} the section
+   */
+  adminPlugins(plugins) {
+    const rescan = h(
+      "button",
+      {
+        onclick: async () => {
+          await this.net.request("admin.plugins.rescan");
+          toast("Rescanned.");
+          this.admin();
+        },
+      },
+      "Rescan plugins",
+    );
+    const rows = plugins.plugins.map((plugin) => this.adminPluginRow(plugin));
+
+    return adminSection(
+      "Plugins",
+      rescan,
+      h("table.admin-table", {}, h("tbody", {}, rows)),
+    );
+  }
+
+  /**
+   * One plugin's row: its id, kind, version and status, a switch for the
+   * kinds that can be switched off, and its problems.
+   *
+   * @param {object} plugin the plugin's report
+   * @returns {HTMLElement} the row
+   */
+  adminPluginRow(plugin) {
+    const switchable = ["game", "bundle", "mechanic", "theme"];
+    const isLoaded = (plugin.status === "loaded");
+    let devBadge = null;
+    let toggle = null;
+    let toggleText = "Switch on";
+
+    // A badge for a development copy.
+    if (plugin.dev) {
+      devBadge = h("span.badge.dev", {}, "dev");
+    }
+
+    // A switch, for a kind that has one and a plugin that is not broken.
+    if (
+      (switchable.includes(plugin.kind)) &&
+      (plugin.status !== "broken")
+    ) {
+      if (isLoaded) {
+        toggleText = "Switch off";
+      }
+      toggle = h(
+        "button.ghost.small",
+        {
+          onclick: async () => {
+            await this.net.request(
+              "admin.plugins.enable",
+              {
+                kind: plugin.kind,
+                id: plugin.plugin_id,
+                version: plugin.version,
+                enabled: (!isLoaded),
+              },
+            );
+            this.admin();
+          },
+        },
+        toggleText,
+      );
+    }
+
+    return h(
+      "tr",
+      { class: plugin.status },
+      h("td", {}, plugin.plugin_id, devBadge),
+      h("td", {}, plugin.kind),
+      h("td", {}, plugin.version),
+      h("td", {}, h("span.status", { class: plugin.status }, plugin.status)),
+      h("td", {}, toggle),
+      h("td.small", {}, plugin.problems.join("; ")),
+    );
+  }
+
+  /**
+   * The Runtime alerts section: the latest 50, newest first.
+   *
+   * @param {object} alerts the reply to admin.alerts
+   * @returns {HTMLElement} the section
+   */
+  adminAlerts(alerts) {
+    let body = h("p.muted", {}, "None.");
+
+    // List the alerts, if there are any.
+    if (alerts.alerts.length > 0) {
+      body = h(
+        "ul.alerts",
+        {},
+        alerts.alerts.slice(-50).reverse().map(
+          (alert) => h("li", {}, h("b", {}, alert.kind), ` ${alert.detail}`),
+        ),
+      );
+    }
+
+    return adminSection("Runtime alerts", body);
+  }
+
+  /**
+   * The Automatic play section: a form to start a run of bot-only
+   * matches, and a row for each run.
+   *
+   * @param {object} autoplay the reply to admin.autoplay.status
+   * @returns {HTMLElement} the section
+   */
+  adminAutoplay(autoplay) {
+    const gameSelect = h(
+      "select",
+      {},
+      this.games.map(
+        (game) => h("option", { value: game.game_id }, game.name),
+      ),
+    );
     const botSeats = h("div.row");
-    const fillBots = () => {
-      const g = this.games.find((x) => x.game_id === gameSel.value);
-      const n = Math.max(2, g.min_players || 1);
-      const bots = g.bots || [];
-      clear(botSeats, Array.from({ length: Math.min(n, g.max_players || n) }, (_, i) =>
-        h("select", { dataset: { i } }, bots.map((b, j) => h("option", { value: b, selected: j === i % bots.length }, b)))));
-    };
-    gameSel.addEventListener("change", fillBots);
-    fillBots();
     const count = h("input", { type: "number", value: 20, min: 1, max: 1000 });
+    const rows = autoplay.runs.map((run) => this.adminAutoplayRow(run));
+    let start = null;
+
+    // Offer a bot for each seat of the chosen game.
+    gameSelect.addEventListener(
+      "change",
+      () => this.adminFillBots(gameSelect, botSeats),
+    );
+    this.adminFillBots(gameSelect, botSeats);
+
+    // Start a run with the bots chosen.
+    start = h(
+      "button.primary",
+      {
+        onclick: async () => {
+          const bots = Array.from(
+            botSeats.querySelectorAll("select"),
+            (select) => select.value,
+          );
+          try {
+            await this.net.request(
+              "admin.autoplay.start",
+              {
+                game_id: gameSelect.value,
+                bots,
+                matches: Number(count.value),
+              },
+            );
+            toast("Started.");
+            this.admin();
+          } catch (e) {
+            toast(e.message, "error");
+          }
+        },
+      },
+      "Start",
+    );
+
+    return adminSection(
+      "Automatic play",
+      h(
+        "p.muted",
+        {},
+        "Seat only bots and let matches play out, to build a rating " +
+        "baseline. They count toward ratings like any match.",
+      ),
+      h(
+        "div.row",
+        {},
+        gameSelect,
+        botSeats,
+        h("label.field.inline", {}, h("span", {}, "matches"), count),
+        start,
+      ),
+      h("table.admin-table", {}, h("tbody", {}, rows)),
+    );
+  }
+
+  /**
+   * Fill the bot seats with a bot picker for each seat of a game.
+   *
+   * @param {HTMLSelectElement} gameSelect the picker of the game
+   * @param {HTMLElement} botSeats where the bot pickers go
+   */
+  adminFillBots(gameSelect, botSeats) {
+    const game = this.games.find(
+      (x) => (x.game_id === gameSelect.value),
+    );
+    const players = Math.max(2, game.min_players || 1);
+    const bots = game.bots || [];
+    const seats = Math.min(players, game.max_players || players);
+    const pickers = [];
+
+    // One picker for each seat, each starting on the next bot in turn.
+    for (let i = 0; i < seats; i++) {
+      const options = [];
+      for (let j = 0; j < bots.length; j++) {
+        options.push(h(
+          "option",
+          { value: bots[j], selected: (j === (i % bots.length)) },
+          bots[j],
+        ));
+      }
+      pickers.push(h("select", { dataset: { i } }, options));
+    }
+    clear(botSeats, pickers);
+  }
+
+  /**
+   * One automatic play run's row, with a Stop button while it runs.
+   *
+   * @param {object} run the run
+   * @returns {HTMLElement} the row
+   */
+  adminAutoplayRow(run) {
+    let stop = null;
+
+    // A Stop button, while it runs.
+    if (run.status === "running") {
+      stop = h(
+        "button.ghost.small",
+        {
+          onclick: async () => {
+            await this.net.request(
+              "admin.autoplay.stop",
+              { run_id: run.run_id },
+            );
+            this.admin();
+          },
+        },
+        "Stop",
+      );
+    }
+
+    return h(
+      "tr",
+      {},
+      h("td", {}, `run ${run.run_id}`),
+      h("td", {}, run.game_id),
+      h("td", {}, run.status),
+      h("td", {}, `${run.completed}/${run.requested}`),
+      h("td.small.muted", {}, `seed ${run.seed}`),
+      h("td", {}, stop),
+    );
+  }
+
+  /**
+   * The Rating systems section: a row for each game and system.
+   *
+   * @param {object} ratings the reply to admin.ratings.list
+   * @returns {HTMLElement} the section
+   */
+  adminRatings(ratings) {
+    const rows = [];
+
+    // A row for each system, under each game.
+    for (const game of this.games) {
+      for (const system of ratings.systems) {
+        rows.push(this.adminRatingRow(game, system, ratings));
+      }
+    }
+
+    return adminSection(
+      "Rating systems",
+      h(
+        "p.muted",
+        {},
+        "The only switch for ratings: which systems apply to which " +
+        "games. Enabling one rebuilds it over the whole history.",
+      ),
+      h("table.admin-table", {}, h("tbody", {}, rows)),
+    );
+  }
+
+  /**
+   * One game and rating system's row: whether it is on, a switch, and a
+   * Rebuild button while it is on.
+   *
+   * @param {object} game the game
+   * @param {object} system the rating system
+   * @param {object} ratings the reply to admin.ratings.list
+   * @returns {HTMLElement} the row
+   */
+  adminRatingRow(game, system, ratings) {
+    const row = ratings.enabled.find(
+      (e) => (
+        (e.game_id === game.game_id) &&
+        (e.system_id === system.system_id)
+      ),
+    );
+    const isEnabled = ((row != null) && (row.is_enabled));
+    const which = { game_id: game.game_id, system_id: system.system_id };
+    let stateText = "off";
+    let method = "admin.ratings.enable";
+    let switchText = "Switch on (rebuild)";
+    let rebuild = null;
+
+    // While it is on: switch it off, or rebuild it.
+    if (isEnabled) {
+      stateText = "on";
+      method = "admin.ratings.disable";
+      switchText = "Switch off";
+      rebuild = h(
+        "button.ghost.small",
+        {
+          onclick: async () => {
+            const reply = await this.net.request(
+              "admin.ratings.rebuild",
+              which,
+            );
+            toast(`Rebuilt over ${reply.rebuilt_matches} matches.`);
+          },
+        },
+        "Rebuild",
+      );
+    }
+
+    return h(
+      "tr",
+      {},
+      h("td", {}, game.name),
+      h("td", {}, system.name),
+      h("td", {}, stateText),
+      h(
+        "td",
+        {},
+        h(
+          "button.ghost.small",
+          {
+            onclick: async () => {
+              await this.net.request(method, which);
+              this.admin();
+            },
+          },
+          switchText,
+        ),
+      ),
+      h("td", {}, rebuild),
+    );
+  }
+
+  /**
+   * The Accounts section: a form to create one, and a row for each
+   * person's account (not the bots').
+   *
+   * @param {object} accounts the reply to admin.accounts.list
+   * @returns {HTMLElement} the section
+   */
+  adminAccounts(accounts) {
     const newUser = h("input", { placeholder: "username" });
     const newPass = h("input", { type: "password", placeholder: "password" });
-    this.shell("admin", h("div.admin", {},
-      section("Plugins",
-        h("button", { onclick: async () => { await this.net.request("admin.plugins.rescan"); toast("Rescanned."); this.admin(); } }, "Rescan plugins"),
-        h("table.admin-table", {}, h("tbody", {}, plugins.plugins.map((p) => h("tr", { class: p.status }, h("td", {}, p.plugin_id, p.dev ? h("span.badge.dev", {}, "dev") : null), h("td", {}, p.kind), h("td", {}, p.version),
-          h("td", {}, h("span.status", { class: p.status }, p.status)),
-          h("td", {}, ["game", "bundle", "mechanic", "theme"].includes(p.kind) && p.status !== "broken" ? h("button.ghost.small", { onclick: async () => {
-            await this.net.request("admin.plugins.enable", { kind: p.kind, id: p.plugin_id, version: p.version, enabled: p.status !== "loaded" }); this.admin(); } }, p.status === "loaded" ? "Switch off" : "Switch on") : null),
-          h("td.small", {}, p.problems.join("; "))))))),
-      section("Runtime alerts", alerts.alerts.length ? h("ul.alerts", {}, alerts.alerts.slice(-50).reverse().map((a) => h("li", {}, h("b", {}, a.kind), ` ${a.detail}`))) : h("p.muted", {}, "None.")),
-      section("Automatic play",
-        h("p.muted", {}, "Seat only bots and let matches play out, to build a rating baseline. They count toward ratings like any match."),
-        h("div.row", {}, gameSel, botSeats, h("label.field.inline", {}, h("span", {}, "matches"), count),
-          h("button.primary", { onclick: async () => {
-            const bots = Array.from(botSeats.querySelectorAll("select"), (s) => s.value);
-            try { await this.net.request("admin.autoplay.start", { game_id: gameSel.value, bots, matches: Number(count.value) }); toast("Started."); this.admin(); } catch (e) { toast(e.message, "error"); }
-          } }, "Start")),
-        h("table.admin-table", {}, h("tbody", {}, autoplay.runs.map((r) => h("tr", {}, h("td", {}, `run ${r.run_id}`), h("td", {}, r.game_id), h("td", {}, r.status),
-          h("td", {}, `${r.completed}/${r.requested}`), h("td.small.muted", {}, `seed ${r.seed}`),
-          h("td", {}, r.status === "running" ? h("button.ghost.small", { onclick: async () => { await this.net.request("admin.autoplay.stop", { run_id: r.run_id }); this.admin(); } }, "Stop") : null)))))),
-      section("Rating systems",
-        h("p.muted", {}, "The only switch for ratings: which systems apply to which games. Enabling one rebuilds it over the whole history."),
-        h("table.admin-table", {}, h("tbody", {}, this.games.flatMap((g) => ratings.systems.map((sys) => {
-          const row = ratings.enabled.find((e) => e.game_id === g.game_id && e.system_id === sys.system_id);
-          return h("tr", {}, h("td", {}, g.name), h("td", {}, sys.name), h("td", {}, row?.is_enabled ? "on" : "off"),
-            h("td", {}, h("button.ghost.small", { onclick: async () => {
-              await this.net.request(row?.is_enabled ? "admin.ratings.disable" : "admin.ratings.enable", { game_id: g.game_id, system_id: sys.system_id }); this.admin(); } }, row?.is_enabled ? "Switch off" : "Switch on (rebuild)")),
-            h("td", {}, row?.is_enabled ? h("button.ghost.small", { onclick: async () => { const r = await this.net.request("admin.ratings.rebuild", { game_id: g.game_id, system_id: sys.system_id }); toast(`Rebuilt over ${r.rebuilt_matches} matches.`); } }, "Rebuild") : null));
-        }))))),
-      section("Accounts",
-        h("div.row", {}, newUser, newPass, h("button", { onclick: async () => { try { await this.net.request("admin.accounts.create", { username: newUser.value, password: newPass.value }); this.admin(); } catch (e) { toast(e.message, "error"); } } }, "Create account")),
-        h("table.admin-table", {}, h("tbody", {}, accounts.accounts.filter((a) => !a.is_bot).map((a) => h("tr", {}, h("td", {}, a.username), h("td", {}, a.display_name),
-          h("td", {}, a.is_admin ? "admin" : ""), h("td", {}, a.bypass_limits ? "ignores limits" : ""),
-          h("td", {}, h("button.ghost.small", { onclick: async () => { const p = prompt(`New password for ${a.username}?`); if (p) this.net.request("admin.accounts.set_password", { username: a.username, password: p }).then(() => toast("Set."), (e) => toast(e.message, "error")); } }, "Set password"),
-            h("button.ghost.small", { onclick: async () => { await this.net.request("admin.accounts.set_limits", { username: a.username, bypass_limits: !a.bypass_limits }); this.admin(); } }, a.bypass_limits ? "Apply limits" : "Ignore limits"))))))),
-      section("Ended tables",
-        h("p.muted", {}, "Export an ended table's log to a replay bundle (kept on the server, and yours to download), then prune it from the database. Results, recorded stats and ratings stay; replays then load from the bundle and still follow the table's release rules. A pruned table is frozen: what is released stays as it was."),
-        ended.tables.length ? h("table.admin-table", {}, h("tbody", {}, ended.tables.map((t) => h("tr", {},
-          h("td", {}, t.name), h("td", {}, this.gameName(t.game_id)), h("td.small.muted", {}, `${t.matches.length} match(es)${t.autoplay ? " · autoplay" : ""}${t.dev ? " · dev" : ""}`),
-          h("td", {}, t.archived ? "archived" : t.exported ? "exported" : ""),
-          h("td", {},
-            !t.archived ? h("button.ghost.small", { onclick: () => this.adminTable("admin.tables.export", t, "Exported.") }, t.exported ? "Export again" : "Export") : null,
-            t.exported ? h("button.ghost.small", { onclick: () => this.downloadBundle(t) }, "Download") : null,
-            t.exported && !t.archived ? h("button.ghost.small", { onclick: async () => { if (confirm(`Remove the log of "${t.name}" from the database? It stays in its bundle.`)) this.adminTable("admin.tables.prune", t, "Pruned."); } }, "Prune") : null)))))
-          : h("p.muted", {}, "No ended tables.")),
-      section("Uploaded media",
-        h("p.muted", {}, "You can see who uploaded any file, and delete any file. Deletion keeps a tombstone."),
-        media.media.length ? h("table.admin-table", {}, h("tbody", {}, media.media.map((f) => h("tr", { class: f.deleted ? "deleted" : "" }, h("td.small", {}, f.hash.slice(0, 12)), h("td", {}, f.mime), h("td", {}, bytes(f.size_bytes)),
-          h("td", {}, f.uploaded_by || ""), h("td", {}, f.deleted ? `deleted by ${f.deleted_by}` : h("button.ghost.small", { onclick: async () => { if (confirm("Delete this file for everyone?")) { await this.net.request("admin.media.delete", { hash: f.hash }); this.admin(); } } }, "Delete")))))) : h("p.muted", {}, "No uploads."))));
+    const people = accounts.accounts.filter((account) => (!account.is_bot));
+    const rows = people.map((account) => this.adminAccountRow(account));
+    let create = null;
+
+    // Create an account from the form.
+    create = h(
+      "button",
+      {
+        onclick: async () => {
+          try {
+            await this.net.request(
+              "admin.accounts.create",
+              { username: newUser.value, password: newPass.value },
+            );
+            this.admin();
+          } catch (e) {
+            toast(e.message, "error");
+          }
+        },
+      },
+      "Create account",
+    );
+
+    return adminSection(
+      "Accounts",
+      h("div.row", {}, newUser, newPass, create),
+      h("table.admin-table", {}, h("tbody", {}, rows)),
+    );
+  }
+
+  /**
+   * One account's row: its names, whether it is an admin and ignores
+   * limits, and buttons to set its password and its limits.
+   *
+   * @param {object} account the account
+   * @returns {HTMLElement} the row
+   */
+  adminAccountRow(account) {
+    let adminText = "";
+    let limitsText = "";
+    let limitsButton = "Ignore limits";
+
+    // What it is and may do.
+    if (account.is_admin) {
+      adminText = "admin";
+    }
+    if (account.bypass_limits) {
+      limitsText = "ignores limits";
+      limitsButton = "Apply limits";
+    }
+
+    return h(
+      "tr",
+      {},
+      h("td", {}, account.username),
+      h("td", {}, account.display_name),
+      h("td", {}, adminText),
+      h("td", {}, limitsText),
+      h(
+        "td",
+        {},
+        h(
+          "button.ghost.small",
+          { onclick: async () => this.adminSetPassword(account) },
+          "Set password",
+        ),
+        h(
+          "button.ghost.small",
+          {
+            onclick: async () => {
+              await this.net.request(
+                "admin.accounts.set_limits",
+                {
+                  username: account.username,
+                  bypass_limits: (!account.bypass_limits),
+                },
+              );
+              this.admin();
+            },
+          },
+          limitsButton,
+        ),
+      ),
+    );
+  }
+
+  /**
+   * Ask for an account's new password, and set it.
+   *
+   * @param {object} account the account
+   */
+  async adminSetPassword(account) {
+    const password = prompt(`New password for ${account.username}?`);
+
+    // Set it, unless the prompt was cancelled or left empty.
+    if ((password != null) && (password !== "")) {
+      this.net.request(
+        "admin.accounts.set_password",
+        { username: account.username, password },
+      ).then(() => toast("Set."), (e) => toast(e.message, "error"));
+    }
+  }
+
+  /**
+   * The Active tables section: a row for each table that has not ended,
+   * loaded or not, to retire it.
+   *
+   * @param {object} active the reply to admin.tables.list
+   * @returns {HTMLElement} the section
+   */
+  adminActive(active) {
+    let body = h("p.muted", {}, "No active tables.");
+
+    // A row for each table, if there are any.
+    if (active.tables.length > 0) {
+      body = h(
+        "table.admin-table",
+        {},
+        h(
+          "tbody",
+          {},
+          active.tables.map((table) => this.adminActiveRow(table)),
+        ),
+      );
+    }
+
+    return adminSection(
+      "Active tables",
+      h(
+        "p.muted",
+        {},
+        "Every table that has not ended, including those that could not " +
+        "load (usually because their game version is no longer " +
+        "installed). Retiring a table ends it: a running match is " +
+        "abandoned and nothing is scored. Its log is kept.",
+      ),
+      body,
+    );
+  }
+
+  /**
+   * One active table's row: its name, game and version, status, creator
+   * and date, whether it is loaded or why not, and a Retire button.
+   *
+   * @param {object} table the table
+   * @returns {HTMLElement} the row
+   */
+  adminActiveRow(table) {
+    let notes = `${table.status} · by ${table.created_by || "?"}`;
+    let loaded = null;
+    let rowClass = "";
+
+    // What kind of table it is, and when it was made.
+    if (table.autoplay) {
+      notes += " · autoplay";
+    }
+    if (table.dev) {
+      notes += " · dev";
+    }
+    notes += ` · ${formatTime(table.created_at)}`;
+
+    // Whether it is loaded, or why not.
+    if (table.loaded) {
+      loaded = "loaded";
+    } else {
+      rowClass = "broken";
+      loaded = h("span.status.broken", {}, table.problem);
+    }
+
+    return h(
+      "tr",
+      { class: rowClass },
+      h("td", {}, table.name),
+      h("td", {}, `${table.game_id}@${table.game_version}`),
+      h("td.small.muted", {}, notes),
+      h("td.small", {}, loaded),
+      h(
+        "td",
+        {},
+        h(
+          "button.ghost.small",
+          { onclick: async () => this.adminRetire(table) },
+          "Retire",
+        ),
+      ),
+    );
+  }
+
+  /**
+   * Ask the admin to confirm, then retire a table.
+   *
+   * @param {object} table the table
+   */
+  async adminRetire(table) {
+    const question = (
+      `Retire "${table.name}"? It ends now, and cannot be played again. ` +
+      "A running match is abandoned and nothing is scored."
+    );
+
+    // Retire it, once confirmed.
+    if (confirm(question)) {
+      this.adminTable("admin.tables.retire", table, "Retired.");
+    }
+  }
+
+  /**
+   * The Ended tables section: a row for each ended table, to export,
+   * download and prune its log.
+   *
+   * @param {object} ended the reply to tables.list for ended tables
+   * @returns {HTMLElement} the section
+   */
+  adminEnded(ended) {
+    let body = h("p.muted", {}, "No ended tables.");
+
+    // A row for each table, if there are any.
+    if (ended.tables.length > 0) {
+      body = h(
+        "table.admin-table",
+        {},
+        h("tbody", {}, ended.tables.map((table) => this.adminEndedRow(table))),
+      );
+    }
+
+    return adminSection(
+      "Ended tables",
+      h(
+        "p.muted",
+        {},
+        "Export an ended table's log to a replay bundle (kept on the " +
+        "server, and yours to download), then prune it from the " +
+        "database. Results, recorded stats and ratings stay; replays then " +
+        "load from the bundle and still follow the table's release rules. " +
+        "A pruned table is frozen: what is released stays as it was.",
+      ),
+      body,
+    );
+  }
+
+  /**
+   * One ended table's row: its name, game, matches and archive state,
+   * and the buttons that fit that state.
+   *
+   * @param {object} table the table
+   * @returns {HTMLElement} the row
+   */
+  adminEndedRow(table) {
+    let notes = `${table.matches.length} match(es)`;
+    let state = "";
+    let exportButton = null;
+    let exportText = "Export";
+    let download = null;
+    let prune = null;
+
+    // What kind of table it was, and how far its log is archived.
+    if (table.autoplay) {
+      notes += " · autoplay";
+    }
+    if (table.dev) {
+      notes += " · dev";
+    }
+    if (table.retired) {
+      notes += " · retired";
+    }
+    if (table.archived) {
+      state = "archived";
+    } else if (table.exported) {
+      state = "exported";
+    } else {
+      state = "";
+    }
+
+    // Export, until it is archived.
+    if (!table.archived) {
+      if (table.exported) {
+        exportText = "Export again";
+      }
+      exportButton = h(
+        "button.ghost.small",
+        {
+          onclick: () => this.adminTable(
+            "admin.tables.export",
+            table,
+            "Exported.",
+          ),
+        },
+        exportText,
+      );
+    }
+
+    // Download, once exported; prune, once exported and not yet archived.
+    if (table.exported) {
+      download = h(
+        "button.ghost.small",
+        { onclick: () => this.downloadBundle(table) },
+        "Download",
+      );
+    }
+    if ((table.exported) && (!table.archived)) {
+      prune = h(
+        "button.ghost.small",
+        {
+          onclick: async () => {
+            if (confirm(
+              `Remove the log of "${table.name}" from the database? ` +
+              "It stays in its bundle.",
+            )) {
+              this.adminTable("admin.tables.prune", table, "Pruned.");
+            }
+          },
+        },
+        "Prune",
+      );
+    }
+
+    return h(
+      "tr",
+      {},
+      h("td", {}, table.name),
+      h("td", {}, this.gameName(table.game_id)),
+      h("td.small.muted", {}, notes),
+      h("td", {}, state),
+      h("td", {}, exportButton, download, prune),
+    );
+  }
+
+  /**
+   * The Uploaded media section: a row for each file.
+   *
+   * @param {object} media the reply to admin.media.list
+   * @returns {HTMLElement} the section
+   */
+  adminMedia(media) {
+    let body = h("p.muted", {}, "No uploads.");
+
+    // A row for each file, if there are any.
+    if (media.media.length > 0) {
+      body = h(
+        "table.admin-table",
+        {},
+        h("tbody", {}, media.media.map((file) => this.adminMediaRow(file))),
+      );
+    }
+
+    return adminSection(
+      "Uploaded media",
+      h(
+        "p.muted",
+        {},
+        "You can see who uploaded any file, and delete any file. " +
+        "Deletion keeps a tombstone.",
+      ),
+      body,
+    );
+  }
+
+  /**
+   * One uploaded file's row: its hash, type, size and uploader, and a
+   * Delete button or who deleted it.
+   *
+   * @param {object} file the file
+   * @returns {HTMLElement} the row
+   */
+  adminMediaRow(file) {
+    let rowClass = "";
+    let deleted = null;
+
+    // Who deleted it, or a button to delete it.
+    if (file.deleted) {
+      rowClass = "deleted";
+      deleted = `deleted by ${file.deleted_by}`;
+    } else {
+      deleted = h(
+        "button.ghost.small",
+        {
+          onclick: async () => {
+            if (confirm("Delete this file for everyone?")) {
+              await this.net.request(
+                "admin.media.delete",
+                { hash: file.hash },
+              );
+              this.admin();
+            }
+          },
+        },
+        "Delete",
+      );
+    }
+
+    return h(
+      "tr",
+      { class: rowClass },
+      h("td.small", {}, file.hash.slice(0, 12)),
+      h("td", {}, file.mime),
+      h("td", {}, bytes(file.size_bytes)),
+      h("td", {}, file.uploaded_by || ""),
+      h("td", {}, deleted),
+    );
   }
 }
 
@@ -850,6 +1582,17 @@ async function fetchJSON(url, timeoutMs = 4000) {
   } catch {
     return null;
   }
+}
+
+/**
+ * One section of the Admin page: a heading, then its body.
+ *
+ * @param {string} title the section's heading
+ * @param {...*} body what goes under the heading
+ * @returns {HTMLElement} the section
+ */
+function adminSection(title, ...body) {
+  return h("section.admin-section", {}, h("h3", {}, title), body);
 }
 
 function fmt(v) {
