@@ -21,6 +21,12 @@ import { ViewerPreferences } from "./preferences.js";
 import { SIDE_TURNS, SIDES, sideFor } from "./facing.js";
 import { myPending, othersPending } from "./pending.js";
 import {
+  endTurnControl,
+  isRefused,
+  refusalText,
+  refusedAttributes,
+} from "./refusals.js";
+import {
   cameToMe,
   chime,
   chimeIsOn,
@@ -111,25 +117,91 @@ export class TableScreen {
 
   // ---------------------------------------------------------------- messages from the server
 
+  /**
+   * Handle a message from the server for this table.
+   *
+   * @param {string} type the message's type
+   * @param {object} msg the message
+   * @returns {Promise<*>} what its handler gives, if anything
+   */
   async on(type, msg) {
-    if (type === "client_manifest") return this.onManifest(msg);
-    if (type === "fetch_list") return this.onFetch(msg);
-    if (type === "transfer_status") return this.onTransfer(msg);
-    if (type === "snapshot") return this.onSnapshot(msg);
-    if (type === "event") return this.onEvent(msg);
-    if (type === "keys") { this.app.cache.setKeys(msg.keys); return; }
-    if (type === "controls") { this.controls = msg.controls; this.renderControls(); this.renderHand(); this.renderScene(); return; }
-    if (type === "lobby") {
-      const ended = msg.status === "ended" && this.status !== "ended";
-      this.seats = msg.seats; this.odds = msg.odds; this.status = msg.status;
-      this.renderSeats(); this.renderLobby();
-      if (ended) { this.renderHeader(); toast("This table has ended."); }
-      return;
+    let ret = undefined;
+
+    switch (type) {
+      case "client_manifest":
+        ret = this.onManifest(msg);
+        break;
+      case "fetch_list":
+        ret = this.onFetch(msg);
+        break;
+      case "transfer_status":
+        ret = this.onTransfer(msg);
+        break;
+      case "snapshot":
+        ret = this.onSnapshot(msg);
+        break;
+      case "event":
+        ret = this.onEvent(msg);
+        break;
+      case "keys":
+        this.app.cache.setKeys(msg.keys);
+        break;
+      case "controls":
+        // End turn in the turn line reads its control too.
+        this.controls = msg.controls;
+        this.renderControls();
+        this.renderTurn();
+        this.renderHand();
+        this.renderScene();
+        break;
+      case "lobby":
+        this.onLobby(msg);
+        break;
+      case "vote_open":
+        ret = this.onVote(msg);
+        break;
+      case "vote_closed":
+        this.votes.get(msg.vote_id)?.close();
+        this.votes.delete(msg.vote_id);
+        break;
+      case "ephemeral":
+        ret = this.sceneView.ping(msg);
+        break;
+      case "notice":
+        // Only a notice for the admin is shown.
+        if (msg.code === "tell_admin") {
+          toast(this.text.t(msg.text), "warn", 10000);
+        }
+        break;
+      default:
+        // A message this client does not know is left alone.
+        break;
     }
-    if (type === "vote_open") return this.onVote(msg);
-    if (type === "vote_closed") { this.votes.get(msg.vote_id)?.close(); this.votes.delete(msg.vote_id); return; }
-    if (type === "ephemeral") return this.sceneView.ping(msg);
-    if (type === "notice" && msg.code === "tell_admin") toast(this.text.t(msg.text), "warn", 10000);
+
+    return ret;
+  }
+
+  /**
+   * The lobby changed: seats, readiness, connections, ratings or the
+   * table's status.
+   *
+   * @param {object} msg the lobby message
+   */
+  onLobby(msg) {
+    const ended = ((msg.status === "ended") && (this.status !== "ended"));
+
+    // Keep it, and draw it.
+    this.seats = msg.seats;
+    this.odds = msg.odds;
+    this.status = msg.status;
+    this.renderSeats();
+    this.renderLobby();
+
+    // The table ending is said once.
+    if (ended) {
+      this.renderHeader();
+      toast("This table has ended.");
+    }
   }
 
   async onManifest(m) {
@@ -654,12 +726,14 @@ export class TableScreen {
    * not, and in the hand view): whose turn it is, and who is laying down
    * a play, hidden when there is neither. Where the game keeps a turn of
    * its own, the seat whose turn it is (and the GM) gets End turn, and a
-   * seated viewer the chime switch. A viewer holding a play pending gets
-   * Commit play and Cancel.
+   * seated viewer the chime switch. End turn is greyed, with the reason,
+   * when the server says passing would be refused. A viewer holding a
+   * play pending gets Commit play and Cancel.
    */
   renderTurn() {
     let turn = null;
     let text = "";
+    let passControl = null;
     let endButton = null;
     let chimeButton = null;
     let mine = [];
@@ -688,9 +762,11 @@ export class TableScreen {
         (keepsTurn(this.look.declaration)) &&
         ((turn === this.seat) || (this.isGM()))
       ) {
+        passControl = endTurnControl(this.controls);
         endButton = h("button.small.end-turn", {
-          onclick: () => this.act("turn.pass", {}),
+          onclick: () => this.endTurn(passControl),
           title: "Pass the turn to the next seat",
+          ...refusedAttributes(passControl),
         }, "End turn");
       }
       if ((turn != null) && (this.seat != null)) {
@@ -1526,19 +1602,100 @@ export class TableScreen {
     this.app.openTable(this.id, { view: "table" });
   }
 
+  /**
+   * Fill the controls panel: a button for each control that is not done
+   * by direct manipulation, flow steps last. With none, a seated viewer
+   * in a running match is told they are waiting. A control the rules
+   * would refuse is still drawn, greyed, with their reason.
+   */
   renderControls() {
-    if (!this.controlsEl) return;
-    const buttons = this.controls.filter((c) => !c.interactive);
-    const flows = buttons.filter((c) => c.action_type === "flow.step");
-    const plain = buttons.filter((c) => c.action_type !== "flow.step");
-    if (!buttons.length) {
-      clear(this.controlsEl, this.seat != null && this.state.match?.status === "running" ? h("p.muted.waiting", {}, "Waiting for another player…") : null);
-      return;
+    let buttons = [];
+    let flows = [];
+    let plain = [];
+    let unconfirmed = 0;
+    let waiting = null;
+
+    if (this.controlsEl) {
+      // The buttons, split into plain controls and flow steps.
+      buttons = this.controls.filter((c) => !c.interactive);
+      flows = buttons.filter((c) => c.action_type === "flow.step");
+      plain = buttons.filter((c) => c.action_type !== "flow.step");
+
+      if (!buttons.length) {
+        // Nothing to do yet.
+        if (
+          (this.seat != null) &&
+          (this.state.match?.status === "running")
+        ) {
+          waiting = h("p.muted.waiting", {}, "Waiting for another player…");
+        }
+        clear(this.controlsEl, waiting);
+      } else {
+        // Up to three plain controls are big; one to confirm is quiet.
+        unconfirmed = plain.filter((x) => !x.confirm).length;
+        clear(
+          this.controlsEl,
+          plain.map((c) => h("button", {
+            class: this.controlClass(c, unconfirmed),
+            ...refusedAttributes(c),
+            onclick: () => this.pressControl(c),
+          }, this.text.t(c.label))),
+          flows.map((c) => h("button.flow", {
+            onclick: () => this.runFlow(c),
+          }, this.text.t(c.label))),
+        );
+      }
     }
-    clear(this.controlsEl,
-      plain.map((c) => h("button", { class: c.confirm ? "ghost" : plain.filter((x) => !x.confirm).length <= 3 ? "primary big" : "", disabled: c.enabled === false,
-        onclick: () => this.runControl(c) }, this.text.t(c.label))),
-      flows.map((c) => h("button.flow", { onclick: () => this.runFlow(c) }, this.text.t(c.label))));
+  }
+
+  /**
+   * The class of a plain control's button: quiet when it asks before
+   * it is sent, big when there are few, else plain.
+   *
+   * @param {object} c the control
+   * @param {number} unconfirmed how many plain controls do not ask first
+   * @returns {string} the class
+   */
+  controlClass(c, unconfirmed) {
+    let ret = "";
+
+    if (c.confirm) {
+      ret = "ghost";
+    } else if (unconfirmed <= 3) {
+      ret = "primary big";
+    } else {
+      ret = "";
+    }
+
+    return ret;
+  }
+
+  /**
+   * End turn is pressed: pass the turn, or, when the server says that
+   * would be refused, say why.
+   *
+   * @param {object|null} control End turn's control, when it was sent
+   */
+  endTurn(control) {
+    if (isRefused(control)) {
+      toast(refusalText(control), "warn");
+    } else {
+      this.act("turn.pass", {});
+    }
+  }
+
+  /**
+   * A control's button is pressed: carry it out, or, when the rules
+   * would refuse it, say why, as a refused move is told.
+   *
+   * @param {object} c the control
+   */
+  pressControl(c) {
+    if (isRefused(c)) {
+      toast(refusalText(c), "warn");
+    } else {
+      this.runControl(c);
+    }
   }
 
   async runControl(c) {

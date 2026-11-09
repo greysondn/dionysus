@@ -30,6 +30,7 @@
   "core.value.set": "Seat {seat}'s {name} is now {value}.",
   "core.value.add": "Seat {seat}'s {name} is now {value} ({change}).",
   "core.turn.pass": "It is Seat {seat}'s turn.",
+  "core.turn.end": "End turn",
   "core.pending.commit": "Seat {seat} lays down a play of {count}.",
   "core.timeline.fork": "A new line, {key}, branches from {parent}.",
   "core.timeline.switch": "Seats move to the line {key}.",

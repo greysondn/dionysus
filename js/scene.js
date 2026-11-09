@@ -18,6 +18,7 @@ import {
   readPath,
   seatPath,
 } from "./placemats.js";
+import { isRefused, refusalText } from "./refusals.js";
 import { holeText, valueDeclarations } from "./seatvalues.js";
 import { turnSeat } from "./turn.js";
 import { h, s, toast } from "./ui.js";
@@ -504,7 +505,8 @@ export class SceneView {
 
   /**
    * Have a click on a place carry out the control anchored on it (a
-   * draw), when there is one.
+   * draw), when there is one. A control the rules would refuse leaves
+   * the place clickable, but greyed, with the reason on hover.
    *
    * @param {SVGGElement} box the place's group
    * @param {string} placeId the place's id
@@ -518,6 +520,12 @@ export class SceneView {
     if (draw) {
       box.classList.add("actionable");
       box.addEventListener("click", (e) => this.onPlaceClick(e, draw));
+
+      // Why it would be refused, as the place's tooltip.
+      if (isRefused(draw)) {
+        box.classList.add("refused");
+        box.prepend(s("title", {}, refusalText(draw)));
+      }
     }
   }
 
@@ -945,14 +953,18 @@ export class SceneView {
 
   /**
    * Carry out a place's control when it is clicked with the hand tool
-   * (Alt-click pings instead).
+   * (Alt-click pings instead), or say why the rules would refuse it.
    *
    * @param {MouseEvent} e the click
    * @param {object} control the control anchored on the place
    */
   onPlaceClick(e, control) {
     if ((this.tool === "hand") && (!e.altKey)) {
-      this.app.act(control.action_type, control.params);
+      if (isRefused(control)) {
+        toast(refusalText(control), "warn");
+      } else {
+        this.app.act(control.action_type, control.params);
+      }
     }
   }
 
