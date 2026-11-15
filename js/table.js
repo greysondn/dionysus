@@ -728,7 +728,8 @@ export class TableScreen {
    * its own, the seat whose turn it is (and the GM) gets End turn, and a
    * seated viewer the chime switch. End turn is greyed, with the reason,
    * when the server says passing would be refused. A viewer holding a
-   * play pending gets Commit play and Cancel.
+   * play pending gets Commit play and Cancel here only in the table
+   * view, where there is no hand panel to hold them.
    */
   renderTurn() {
     let turn = null;
@@ -739,8 +740,7 @@ export class TableScreen {
     let mine = [];
     let others = [];
     let pendingText = "";
-    let commitButton = null;
-    let cancelButton = null;
+    let pendingButtons = [];
     let noun = "";
 
     if ((this.turnEl != null) && (this.state != null)) {
@@ -773,19 +773,13 @@ export class TableScreen {
         chimeButton = this.chimeButton();
       }
 
-      // A play being laid down: the viewer's own, to commit or cancel,
-      // and how many cards each other seat holds back.
+      // A play being laid down: the viewer's own, to commit or cancel
+      // when the hand panel isn't showing, and how many cards each other
+      // seat holds back.
       mine = myPending(this.state, this.seat);
       others = othersPending(this.state, this.seat);
-      if (mine.length > 0) {
-        commitButton = h("button.small.commit-play", {
-          onclick: () => this.act("pending.commit", {}),
-          title: "Show your pending cards to everyone, all at once",
-        }, `Commit play (${mine.length})`);
-        cancelButton = h("button.ghost.small.cancel-play", {
-          onclick: () => this.act("pending.cancel", {}),
-          title: "Take every pending card back into your hand",
-        }, "Cancel");
+      if (this.view === "table") {
+        pendingButtons = this.pendingButtons();
       }
       for (const other of others) {
         pendingText += (
@@ -806,10 +800,36 @@ export class TableScreen {
         endButton,
         chimeButton,
         h("span.pending-text", {}, pendingText),
-        commitButton,
-        cancelButton,
+        ...pendingButtons,
       );
     }
+  }
+
+  /**
+   * Commit play and Cancel, for a viewer holding a play pending.
+   *
+   * @returns {Array<HTMLButtonElement>} the two buttons, or none when
+   *     nothing is pending
+   */
+  pendingButtons() {
+    const mine = myPending(this.state, this.seat);
+    let ret = [];
+
+    // Only while the viewer has cards held back.
+    if (mine.length > 0) {
+      ret = [
+        h("button.small.commit-play", {
+          onclick: () => this.act("pending.commit", {}),
+          title: "Show your pending cards to everyone, all at once",
+        }, `Commit play (${mine.length})`),
+        h("button.ghost.small.cancel-play", {
+          onclick: () => this.act("pending.cancel", {}),
+          title: "Take every pending card back into your hand",
+        }, "Cancel"),
+      ];
+    }
+
+    return ret;
   }
 
   /**
@@ -1824,8 +1844,9 @@ export class TableScreen {
         canPlay = this.controls.some((control) => (
           control.action_type === "tabletop.play"
         ));
-        clear(this.handEl, mine.map(([pid, ids]) => (
-          this.handBlock(pid, ids, canPlay)
+        // The first place's head carries Commit play and Cancel.
+        clear(this.handEl, mine.map(([pid, ids], index) => (
+          this.handBlock(pid, ids, canPlay, (index === 0))
         )));
       }
     }
@@ -2244,19 +2265,23 @@ export class TableScreen {
 
   /**
    * One place in the hand panel: its name, its count, the sort button
-   * when it declares an order, and its cards.
+   * when it declares an order, Commit play and Cancel when asked for,
+   * and its cards.
    *
    * @param {string} pid the place's id
    * @param {Array<string>} ids its token ids
    * @param {boolean} canPlay whether the viewer can play cards out of it
+   * @param {boolean} hasPendingButtons whether its head carries Commit
+   *     play and Cancel, for a play the viewer holds pending
    * @returns {HTMLDivElement} the place's block
    */
-  handBlock(pid, ids, canPlay) {
+  handBlock(pid, ids, canPlay, hasPendingButtons) {
     const declaration = (this.look.declaration.places || [])
       .find((place) => pid.startsWith(`${place.place_id}.`));
     const sorted = this.sortHand(ids, declaration);
     let name = pid;
     let sortButton = null;
+    let pendingButtons = [];
 
     // Its name: the declared one, or else its id.
     if ((declaration?.name != null) && (declaration.name !== "")) {
@@ -2271,6 +2296,11 @@ export class TableScreen {
       sortButton = this.sortButton(declaration);
     }
 
+    // Commit play and Cancel, a hand action, beside the sort button.
+    if (hasPendingButtons) {
+      pendingButtons = this.pendingButtons();
+    }
+
     return h(
       "div.hand",
       { "data-place": pid },
@@ -2280,6 +2310,7 @@ export class TableScreen {
         h("h3", {}, name),
         h("span.muted", {}, `${ids.length}`),
         sortButton,
+        ...pendingButtons,
       ),
       h("div.hand-cards", {}, sorted.map((id) => (
         this.handCard(id, canPlay)
