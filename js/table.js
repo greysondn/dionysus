@@ -36,6 +36,7 @@ import {
 } from "./turn.js";
 import { channelVolume, focusStar, playMedia, SceneView } from "./scene.js";
 import { PaneSizer } from "./panes.js";
+import { PlacePicker } from "./pick.js";
 import { apply } from "./patch.js";
 import { bytes, clear, dialog, h, s, schemaForm, toast } from "./ui.js";
 
@@ -152,6 +153,7 @@ export class TableScreen {
         this.renderControls();
         this.renderTurn();
         this.renderHand();
+        this.renderPiles();
         this.renderScene();
         break;
       case "lobby":
@@ -609,6 +611,7 @@ export class TableScreen {
     this.valuesEl = h("section.values-panel");
     this.handEl = h("section.hand-panel");
     this.placesEl = h("section.places-panel");
+    this.pilesEl = h("section.piles-panel");
     this.stateEl = h("section.state-panel");
     this.logEl = h("div.log");
     if (this.feature("messages")) {
@@ -678,6 +681,7 @@ export class TableScreen {
           this.turnEl,
           this.controlsEl,
           this.valuesEl,
+          this.pilesEl,
           this.handEl,
           this.stateEl,
           fold,
@@ -882,6 +886,7 @@ export class TableScreen {
     this.renderControls();
     this.renderHand();
     this.renderPlaces();
+    this.renderPiles();
     this.renderState();
     this.renderLog();
     this.renderScene();
@@ -1252,6 +1257,10 @@ export class TableScreen {
           onclick: () => this.togglePen(),
           title: "Draw on the board",
         }, "Pen"));
+        ret.push(h("button.ghost", {
+          onclick: (e) => this.eraseMenu(e),
+          title: "Erase marks on the board",
+        }, "Erase"));
       }
     }
 
@@ -1276,6 +1285,114 @@ export class TableScreen {
       this.sceneView.tool = "pen";
     }
     this.renderHeader();
+  }
+
+  /**
+   * Whether the viewer manages the table: an admin, its creator, or its
+   * GM. The server checks again for anything that needs it.
+   *
+   * @returns {boolean} whether they manage it
+   */
+  isManager() {
+    return (
+      (this.app.account.is_admin) ||
+      (this.snap.table?.created_by === this.app.account.id) ||
+      (this.isGM())
+    );
+  }
+
+  /**
+   * The Erase menu: the viewer's own marks, and for the table's manager
+   * each other seat's marks and the whole board.
+   *
+   * @param {MouseEvent} e the click on Erase
+   */
+  eraseMenu(e) {
+    const scene = this.scene?.scene_key;
+    const authors = new Set();
+    const items = [["Erase my marks", () => this.clearMarks(this.seat)]];
+
+    // The other seats with marks on this scene.
+    for (const mark of Object.values(this.state.marks || {})) {
+      if (
+        (mark != null) &&
+        (mark.scene === scene) &&
+        (mark.by !== this.seat)
+      ) {
+        authors.add(mark.by);
+      }
+    }
+
+    // The manager may erase theirs, or everything.
+    if (this.isManager()) {
+      for (const author of [...authors].sort((a, b) => a - b)) {
+        items.push([
+          `Erase ${this.seatName(author)}'s marks`,
+          () => this.clearMarks(author),
+        ]);
+      }
+      items.push(["Clear the board", () => this.clearBoard()]);
+    }
+
+    this.menu(e.clientX, e.clientY, items);
+  }
+
+  /**
+   * Clear every mark on the board, once the manager says so: it can't be
+   * undone.
+   */
+  async clearBoard() {
+    const isSure = await dialog(
+      "Clear the board",
+      h(
+        "p",
+        {},
+        "Erase every mark on this board, everyone's? Undo won't bring " +
+        "them back.",
+      ),
+      [["Clear it", true, "primary"], ["Cancel", false]],
+    );
+
+    if (isSure) {
+      await this.clearMarks(null);
+    }
+  }
+
+  /**
+   * Erase marks on the board the viewer is looking at: one seat's, or
+   * every one, with the viewer's own marks for their eyes only.
+   *
+   * @param {number|null} author the seat whose marks go, or null for
+   *     every mark
+   */
+  async clearMarks(author) {
+    const scene = this.scene?.scene_key;
+    const params = { table_id: this.id, scene: scene };
+    let result = null;
+
+    // Ask the server; it says who may.
+    if (author != null) {
+      params.author = author;
+    }
+    try {
+      result = await this.net.request("marks.clear", params);
+    } catch (error) {
+      toast(error.message, "warn");
+    }
+
+    // The viewer's own marks go from this board, unless it was another
+    // seat's marks that went.
+    if (result != null) {
+      if ((author == null) || (author === this.seat)) {
+        this.personalMarks = this.personalMarks.filter((mark) => (
+          mark.scene !== scene
+        ));
+        this.renderScene();
+      }
+      if (result.erased === 0) {
+        toast("There were no marks to erase");
+      }
+    }
   }
 
   /**
@@ -2379,8 +2496,11 @@ export class TableScreen {
         drawn.node,
       );
 
-      // It can be dragged when the viewer can play.
-      if (canPlay) {
+      // It can be dragged when the viewer can play; in the hand view it
+      // is tapped instead.
+      if ((canPlay) && (this.view === "hand")) {
+        title = "Tap to play it";
+      } else if (canPlay) {
         draggable = "true";
         title = (
           "Drag onto the table (hold Shift for face down), or onto a pile"
@@ -2399,6 +2519,13 @@ export class TableScreen {
       ret.addEventListener("contextmenu", (e) => (
         this.handCardMenu(e, id, canPlay)
       ));
+
+      // In the hand view, a tap opens the picker: where to play it.
+      if ((canPlay) && (this.view === "hand")) {
+        ret.addEventListener("click", () => (
+          new PlacePicker(this, id).open()
+        ));
+      }
     }
 
     return ret;
@@ -2647,6 +2774,119 @@ export class TableScreen {
         );
       }
     }
+  }
+
+  /**
+   * The table's piles, for the hand view, where the board isn't: each
+   * with how many it holds and its top card when that shows face up.
+   * Tapping a face-up top card opens the picker, to take it. Hidden in
+   * the other views, and when there are no piles.
+   */
+  renderPiles() {
+    const rows = [];
+    const places = this.state.places || {};
+    let canPlay = false;
+
+    if (this.pilesEl) {
+      canPlay = (
+        (this.seat != null) &&
+        (this.controls.some((control) => (
+          control.action_type === "tabletop.play"
+        )))
+      );
+
+      // The places no seat owns.
+      if (this.view === "hand") {
+        for (const [pid, contents] of Object.entries(places)) {
+          if (!pid.includes(".")) {
+            rows.push(this.pileRow(pid, contents, canPlay));
+          }
+        }
+      }
+
+      // Hidden when there are none.
+      this.pilesEl.hidden = (rows.length === 0);
+      clear(
+        this.pilesEl,
+        h("h3", {}, "On the table"),
+        h("ul.pile-list", {}, rows),
+      );
+    }
+  }
+
+  /**
+   * One pile in the hand view's list: its name, how many it holds, and
+   * its top card when that shows, which a tap takes.
+   *
+   * A tap does what a click on the pile on the board does: the control
+   * the rules anchor on the pile (such as drawing from it), greyed with
+   * the reason when they would refuse it. Where there is none, it opens
+   * the picker, to play the top card somewhere.
+   *
+   * @param {string} pid the pile's id
+   * @param {Array<string>|object} contents its tokens, or a count
+   * @param {boolean} canPlay whether the viewer can play cards about
+   * @returns {HTMLLIElement} the row
+   */
+  pileRow(pid, contents, canPlay) {
+    const declaration = (this.look.declaration.places || [])
+      .find((p) => p.place_id === pid);
+    const control = this.controls.find((c) => (
+      (c.anchor === `place:${pid}`) &&
+      (c.action_type !== "tabletop.gather")
+    ));
+    let count = contents?.count ?? 0;
+    let top = null;
+    let entity = null;
+    let card = null;
+    let drawn = null;
+    let attributes = {
+      type: "button",
+      disabled: !canPlay,
+      title: "Tap to take it",
+      onclick: () => new PlacePicker(this, top).open(),
+    };
+
+    // How many it holds, and its top card if it shows.
+    if (Array.isArray(contents)) {
+      count = contents.length;
+      top = contents[contents.length - 1] ?? null;
+    }
+    if (top != null) {
+      entity = this.state.entities?.[top];
+    }
+
+    // What a tap does: the pile's own control, where it has one.
+    if (control != null) {
+      attributes = {
+        type: "button",
+        title: this.text.t(control.label),
+        ...refusedAttributes(control),
+        onclick: () => this.pressControl(control),
+      };
+    }
+
+    // The top card, small; a tap takes it.
+    if ((entity != null) && (!entity.hidden)) {
+      drawn = this.look.drawEntity(entity);
+      card = h(
+        "button.pile-top",
+        attributes,
+        s(
+          "svg",
+          { viewBox: `0 0 ${drawn.w} ${drawn.h}`, class: "mini-card" },
+          drawn.node,
+        ),
+      );
+    }
+
+    return h(
+      "li",
+      {},
+      h("span", {}, declaration?.name || pid),
+      h("span.muted", {}, `${count}`),
+      card,
+    );
   }
 
   /**

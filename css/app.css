@@ -200,7 +200,7 @@ button.seat-value { min-height: 0; line-height: 1.4; }
 .table-main { padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; overflow: auto; min-height: 0; }
 .table-side { border-left: 1px solid var(--line); background: var(--bg-2); padding: 12px; display: flex; flex-direction: column; gap: 12px; overflow: auto; min-height: 0; }
 .table-main.view-table { padding: 0; background: #000; }
-.lobby-panel, .values-panel, .hand-panel, .places-panel, .state-panel, .chat-panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.lobby-panel, .values-panel, .hand-panel, .places-panel, .piles-panel, .state-panel, .chat-panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
 .lobby-panel { border-color: var(--accent); }
 .odds ul { margin: 4px 0 0; padding-left: 18px; }
 .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; min-height: 48px; }
@@ -294,6 +294,18 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .place-list li { display: grid; grid-template-columns: 1fr auto; gap: 4px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .mini-cards { grid-column: 1 / -1; display: flex; gap: 4px; flex-wrap: wrap; }
 .mini-card { width: 34px; height: auto; }
+/* The hand view's piles: the table's own places, with a face-up top card to tap and take. */
+.pile-list { list-style: none; margin: 0; padding: 0; }
+.pile-list li { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.pile-top { padding: 2px; line-height: 0; }
+.pile-top .mini-card { width: 44px; }
+/* The picker that places a card without the board: card, then area, then spot. */
+.place-picker .picker { display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow-y: auto; }
+.picker-card .mini-card { width: 56px; }
+.picker-choice { text-align: left; padding: 12px 14px; font-size: 1.05em; }
+.picker-place h4 { margin: 4px 0; }
+.picker-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.picker-spot { min-width: 40px; min-height: 40px; }
 
 /* chat and log */
 .chat-panel { display: flex; flex-direction: column; min-height: 260px; flex: 1; }
