@@ -2512,10 +2512,18 @@ export class TableScreen {
       }
       ret = h(classes, { draggable: draggable, title: title }, svg);
 
-      // Dragging carries the token; its menu plays it to a pile.
-      ret.addEventListener("dragstart", (e) => (
-        e.dataTransfer.setData("text/x-dionysus-token", id)
-      ));
+      // Dragging carries the token; its menu plays it to a pile. The
+      // table keeps it too, for the board's drop: on Windows, Chrome
+      // hands the drag's data to the system and reads it back at the
+      // drop, and on some machines it comes back empty (seen in a live
+      // game, 2026-11-17).
+      ret.addEventListener("dragstart", (e) => {
+        this.draggedToken = id;
+        e.dataTransfer.setData("text/x-dionysus-token", id);
+      });
+      ret.addEventListener("dragend", () => {
+        this.draggedToken = null;
+      });
       ret.addEventListener("contextmenu", (e) => (
         this.handCardMenu(e, id, canPlay)
       ));

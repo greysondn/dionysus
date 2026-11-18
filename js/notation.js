@@ -1,4 +1,4 @@
-// Notation: the game or the position as text, in a format the game's notation plugins write (PDN for draughts), and
+// Notation: the game or the position as text, in a format the game's notation plugins write (PDN for checkers), and
 // loading one back. Export is a request the server answers from what this viewer may see, and is never logged; a load
 // is the action notation.load, which the table agrees to by its load mode (a vote by default) and the rules check.
 import { clear, dialog, h, toast } from "./ui.js";

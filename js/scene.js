@@ -1783,18 +1783,26 @@ export class SceneView {
    * @param {DragEvent} e the drop
    */
   async onDrop(e) {
-    const id = e.dataTransfer.getData("text/x-dionysus-token");
     const p = this.pt(e);
     const placeEl = placeAt(e);
     const index = this.dropIndex(e, placeEl);
+    let id = e.dataTransfer.getData("text/x-dionysus-token");
 
     e.preventDefault();
     this.clearMarker();
 
+    // The card the hand panel says is being dragged wins over the drag's
+    // data, which can arrive empty (see handCard in table.js). It is
+    // used up here, in case the card was redrawn and its dragend lost.
+    if (this.app.draggedToken != null) {
+      id = this.app.draggedToken;
+      this.app.draggedToken = null;
+    }
+
     // Play it where it was dropped, when it is a token: in a fan, at the
     // position under the pointer.
-    if (id) {
-      if (placeEl) {
+    if (id !== "") {
+      if (placeEl != null) {
         await this.app.act("tabletop.play", withIndex({
           token: id, to: placeEl.dataset.place, face_up: true,
         }, index));
