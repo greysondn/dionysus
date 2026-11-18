@@ -3,7 +3,8 @@
   "app.tagline": "A virtual tabletop",
 
   "disclosure.title": "Before you play",
-  "disclosure.unsanitized_html": "This game's displays can contain HTML that is not sanitized. The server's admin vouches for the games installed here, but nothing checks what that HTML does.",
+  "disclosure.unsanitized_html": "Games can show HTML that is not sanitized, in their displays and their rulebooks. The server's admin vouches for the games installed here, but nothing checks what that HTML does.",
+  "disclosure.password_policy": "Don't use a password you would mind the admin knowing. How passwords are handled on this server has not been reviewed by a person yet.",
   "disclosure.seat_inheritance": "Whoever takes your seat next receives everything attached to it: its hand, sheet, journal, marks and plan.",
   "disclosure.public_ratings_stats": "Ratings and recorded stats are always visible to everyone and cannot be hidden.",
   "disclosure.admin_media": "The admin can see who uploaded any file, and can delete any file.",
