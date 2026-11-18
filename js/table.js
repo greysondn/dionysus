@@ -37,6 +37,7 @@ import {
 import { channelVolume, focusStar, playMedia, SceneView } from "./scene.js";
 import { PaneSizer } from "./panes.js";
 import { PlacePicker } from "./pick.js";
+import { expansionsOn, houseRulesIn } from "./rules.js";
 import { apply } from "./patch.js";
 import { bytes, clear, dialog, h, s, schemaForm, toast } from "./ui.js";
 
@@ -1414,6 +1415,18 @@ export class TableScreen {
           " rotation, focus"
         ),
       }, "Project"));
+    }
+
+    // The rules in force and the rulebook, where the game has either.
+    if (
+      ((this.snap.game.variant_declarations || []).length > 0) ||
+      ((this.snap.game.expansion_declarations || []).length > 0) ||
+      (this.look.rulebook != null)
+    ) {
+      ret.push(h("button.ghost", {
+        onclick: () => this.openRules(),
+        title: "The rules in force, and the game's rulebook",
+      }, "Rules"));
     }
 
     // Settings, and sound when the game has cues or media.
@@ -3078,6 +3091,69 @@ export class TableScreen {
   replay(number, view) {
     document.querySelectorAll("dialog[open]").forEach((d) => d.close());
     this.app.openReplay(this.id, number, { view });
+  }
+
+  /**
+   * A dialog listing the rules in force, in words: each house rule with
+   * what the chosen option means, and the expansions that are on; then the
+   * game's rulebook, where it has one. It only reads, so anyone at the
+   * table may open it at any time.
+   */
+  openRules() {
+      const rules = houseRulesIn(
+          this.snap.game.variant_declarations,
+          this.state.settings,
+      );
+      const expansions = expansionsOn(
+          this.snap.game.expansion_declarations,
+          this.state.settings,
+      );
+      const body = h("div.rules-list");
+
+      // Each house rule, and the option chosen for it.
+      if (rules.length > 0) {
+          body.append(h("h3", {}, "House rules"));
+      }
+      for (const rule of rules) {
+          body.append(h(
+              "div.rule",
+              {},
+              h("b", {}, this.text.t({ key: rule.description })),
+              h("p", {}, this.text.t({ key: rule.optionDescription })),
+          ));
+      }
+
+      // Each expansion that is on.
+      if (expansions.length > 0) {
+          body.append(h("h3", {}, "Expansions"));
+      }
+      for (const expansion of expansions) {
+          body.append(h(
+              "div.rule",
+              {},
+              h("b", {}, `${expansion.name} (version ${expansion.version})`),
+              h("p", {}, expansion.description ?? ""),
+          ));
+      }
+
+      // Nothing is set apart from the game's own rules.
+      if ((rules.length === 0) && (expansions.length === 0)) {
+          body.append(h("p.muted", {}, "This game is played as written."));
+      }
+
+      // The game's rulebook, where it has one: an HTML fragment put into
+      // the page as it is. Not sanitized on purpose: a plugin is trusted
+      // with the page, which is a security hole if plugins ever come from
+      // strangers, and it would need closing then (the fragment would be
+      // parsed against an allowlist, or shown in a sandboxed iframe).
+      if (this.look.rulebook != null) {
+          const book = h("div.rulebook");
+
+          book.innerHTML = this.look.rulebook;
+          body.append(h("h3", {}, "Rulebook"), book);
+      }
+
+      dialog("Rules", body, [["Close", true]]);
   }
 
   async openSettings() {

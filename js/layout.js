@@ -60,6 +60,7 @@ export class GameLook {
     this.view = {};               // the viewer's look: { theme, bindings: {every, table}, peek, settings }
     this.flavor = null;           // the table's flavor, as the server sent it, and its strings
     this.flavorStrings = {};
+    this.rulebook = null;         // the game's rulebook: an HTML fragment as text, or null
   }
 
   async load(manifest) {
@@ -114,6 +115,10 @@ export class GameLook {
     await readStrings(plugin, this.declaration);
     for (const [id, exp] of added) await readStrings(id, exp);
     this.strings = strings;
+    // The game's rulebook, an HTML fragment kept as text, where it has one.
+    this.rulebook = null;
+    const rulebookFile = this.declaration.rulebook && this.files.get(`${plugin}/${this.declaration.rulebook.path}`);
+    if (rulebookFile) this.rulebook = await this.cache.text(rulebookFile.hash).catch(() => null);
     this.slots = new Map((this.declaration.slots || []).map((sl) => [sl.key, sl]));
     await this.applyLook(manifest.look);
   }

@@ -516,3 +516,9 @@ dialog.dialog:has(.export-preview) { width: min(860px, calc(100vw - 32px)); }
 .disclosures-panel select { max-width: 260px; }
 span.ok { color: var(--good); font-weight: 600; }
 @media (max-width: 640px) { .replay-bar .where { width: 100%; text-align: left; } }
+
+/* The rules dialog: what a game's rulebook (an HTML fragment) and the rules in force look like. */
+.rules-list .rule p { margin: 0.1rem 0 0.8rem; }
+.rulebook { line-height: 1.5; }
+.rulebook table { border-collapse: collapse; }
+.rulebook th, .rulebook td { border: 1px solid var(--line, #8884); padding: 0.2rem 0.5rem; }
