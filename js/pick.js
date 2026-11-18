@@ -17,6 +17,13 @@ export const TABLE_AREA = "table";
 const SHOWN_CARDS = 6;
 
 /**
+ * How many cards of a stack the spot step shows: only the top one, as
+ * the hand view's pile list does. What lies under it is a history the
+ * players are not meant to browse, even where the cards are face up.
+ */
+const STACK_SHOWN_CARDS = 1;
+
+/**
  * The place holding a token, among the places the viewer can see into.
  *
  * @param {object} places the places, each an array of token ids or (when
@@ -155,6 +162,27 @@ export function spotsFor(declaration, contents) {
 }
 
 /**
+ * The cards of a one-spot place that the spot step draws beside its
+ * button: a stack shows only its top card, any other place its last few.
+ *
+ * @param {object|undefined} declaration the place's declaration
+ * @param {Array<string>} cards the place's tokens, bottom first
+ * @returns {Array<string>} the tokens to draw, bottom first
+ */
+export function shownCards(declaration, cards) {
+    let ret = [];
+
+    // A stack keeps what is under its top card to itself.
+    if (declaration?.ordering === "stack") {
+        ret = cards.slice(-STACK_SHOWN_CARDS);
+    } else {
+        ret = cards.slice(-SHOWN_CARDS);
+    }
+
+    return ret;
+}
+
+/**
  * The picker: a dialog that steps from the card to its area to its spot,
  * then plays it there.
  */
@@ -271,49 +299,49 @@ export class PlacePicker {
    * @returns {HTMLElement} the block
    */
   placeBlock(pid) {
-    const contents = this.table.state.places?.[pid];
-    const base = pid.split(".")[0];
-    const declaration = (this.table.look.declaration.places || [])
-      .find((d) => d.place_id === base);
-    const spots = spotsFor(declaration, contents);
-    const row = h("div.picker-row");
-    let cards = [];
-    let count = 0;
+      const contents = this.table.state.places?.[pid];
+      const base = pid.split(".")[0];
+      const declaration = (this.table.look.declaration.places || [])
+          .find((d) => d.place_id === base);
+      const spots = spotsFor(declaration, contents);
+      const row = h("div.picker-row");
+      let cards = [];
+      let count = 0;
 
-    // Its cards, and how many it holds.
-    if (Array.isArray(contents)) {
-      cards = contents;
-      count = contents.length;
-    } else {
-      count = contents?.count ?? 0;
-    }
-
-    // Its cards, with a spot before each and after the last; or one spot.
-    if (spots[0] === null) {
-      row.append(this.spotButton(pid, null, "Put it here"));
-      for (const id of cards.slice(-SHOWN_CARDS)) {
-        row.append(this.miniCard(id));
+      // Its cards, and how many it holds.
+      if (Array.isArray(contents)) {
+          cards = contents;
+          count = contents.length;
+      } else {
+          count = contents?.count ?? 0;
       }
-    } else {
-      for (const index of spots) {
-        row.append(this.spotButton(pid, index, "+"));
-        if (index < cards.length) {
-          row.append(this.miniCard(cards[index]));
-        }
-      }
-    }
 
-    return h(
-      "div.picker-place",
-      {},
-      h(
-        "h4",
-        {},
-        `${declaration?.name || base} `,
-        h("span.muted", {}, `${count}`),
-      ),
-      row,
-    );
+      // Its cards, with a spot before each and after the last; or one spot.
+      if (spots[0] === null) {
+          row.append(this.spotButton(pid, null, "Put it here"));
+          for (const id of shownCards(declaration, cards)) {
+              row.append(this.miniCard(id));
+          }
+      } else {
+          for (const index of spots) {
+              row.append(this.spotButton(pid, index, "+"));
+              if (index < cards.length) {
+                  row.append(this.miniCard(cards[index]));
+              }
+          }
+      }
+
+      return h(
+          "div.picker-place",
+          {},
+          h(
+              "h4",
+              {},
+              `${declaration?.name || base} `,
+              h("span.muted", {}, `${count}`),
+          ),
+          row,
+      );
   }
 
   /**
