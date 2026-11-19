@@ -7,19 +7,25 @@ import { SIDE_TURNS, sideFor } from "./facing.js";
 /**
  * The seats that have this placemat drawn: each seat with a spot whose
  * every mat place exists for it (with the free tabletop, the seats sat
- * in when the match started).
+ * in when the match started). A mat with no places of its own (a
+ * placard of labels) is drawn for each seat that is occupied.
  *
  * @param {object} mat the placemat's declaration
  * @param {object} places the state's places, as the viewer sees them
+ * @param {string[]} [occupied] the seats someone (or a bot) sits in
  * @returns {string[]} the seat numbers, in order
  */
-export function matSeats(mat, places) {
+export function matSeats(mat, places, occupied = []) {
   const ret = [];
   const names = (mat.places || []).map((place) => place.place_id);
   let hasAll = false;
 
   for (const seat of Object.keys(mat.spots || {})) {
-    hasAll = (names.length > 0);
+    if (names.length > 0) {
+      hasAll = true;
+    } else {
+      hasAll = occupied.includes(seat);
+    }
     for (const name of names) {
       if ((places || {})[`${name}.${seat}`] == null) {
         hasAll = false;

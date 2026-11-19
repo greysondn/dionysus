@@ -226,6 +226,11 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .scene .grid { fill: none; stroke: rgb(255 255 255 / 0.18); stroke-width: 1; }
 .scene .graph-edge { stroke: rgb(255 255 255 / 0.25); stroke-width: 2; }
 .scene .graph-region { fill: rgb(255 255 255 / 0.04); stroke: rgb(255 255 255 / 0.2); }
+.scene .graph-peek { fill: transparent; stroke: none; pointer-events: all; }
+.scene .peek-layer { pointer-events: none; }
+.scene .peek-card { filter: drop-shadow(0 6px 14px rgb(0 0 0 / 0.55)); }
+.scene .token.clickable { cursor: pointer; }
+.scene .token.clickable:hover { filter: brightness(1.08); }
 .scene .safe-zone-outline { fill: none; stroke: rgb(240 215 154 / 0.25); stroke-width: 2; stroke-dasharray: 10 8; pointer-events: none; }
 .scene .token { cursor: grab; }
 .scene .token.dragging { cursor: grabbing; opacity: 0.85; filter: drop-shadow(0 8px 12px rgb(0 0 0 / 0.5)); }

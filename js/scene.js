@@ -36,6 +36,13 @@ const DEFAULT_FIT_MARGIN = 0.1;
 /** px between a placemat and the ring that lights it on its seat's turn. */
 const TURN_RING_GAP = 8;
 
+/** px the longer side of an entity a hovered node peeks at is shown. */
+const PEEK_SIZE = 260;
+
+/** How far from a hovered node toward the safe zone's middle the entity
+ * it peeks at is shown, as a share of the way. */
+const PEEK_PULL = 0.45;
+
 /** The hover hint on one of the viewer's own pending cards. */
 const PENDING_HINT = (
   "Pending: only you see it until you commit the play." +
@@ -211,6 +218,8 @@ export class SceneView {
     this.pingLayer = s("g", { class: "pings" });
     content.append(this.pingLayer);
     content.append(this.cueLayer);
+    this.peekLayer = s("g", { class: "peek-layer" });
+    content.append(this.peekLayer);
     this.placeCue();
     if (this.preferences.show_safe_zone_outline !== false && !this.app.projecting) {
       turned.append(s("rect", { class: "safe-zone-outline", x: zone.x, y: zone.y, width: zone.side, height: zone.side }));
@@ -344,9 +353,12 @@ export class SceneView {
       }
     }
 
-    // Each node's region, and the place on it.
+    // Each node's region, and the place on it. A region that peeks at an
+    // entity is not drawn: it only shows the entity while hovered.
     for (const node of graph.nodes || []) {
-      if (node.region?.length) {
+      if ((node.region?.length) && (node.peek)) {
+        g.append(this.peekRegion(node));
+      } else if (node.region?.length) {
         g.append(s("polygon", {
           points: node.region.map((p) => p.join(",")).join(" "),
           class: "graph-region",
@@ -355,6 +367,67 @@ export class SceneView {
       if (node.place_id) {
         this.drawPlace(g, node);
       }
+    }
+  }
+
+  /**
+   * A node's region that shows the entity the node peeks at while the
+   * pointer is over it, such as a property's deed over its space.
+   *
+   * @param {object} node the node, with a region and a peek path
+   * @returns {SVGPolygonElement} the region, unseen but hoverable
+   */
+  peekRegion(node) {
+    const ret = s("polygon", {
+      points: node.region.map((p) => p.join(",")).join(" "),
+      class: "graph-peek",
+    });
+
+    ret.addEventListener("pointerenter", () => this.showPeek(node));
+    ret.addEventListener("pointerleave", () => this.hidePeek());
+
+    return ret;
+  }
+
+  /**
+   * Show the entity a node peeks at, as it stands (its side as the
+   * viewer sees it), enlarged and upright, between the node and the
+   * middle of the safe zone.
+   *
+   * @param {object} node the node
+   */
+  showPeek(node) {
+    const id = readPath(this.tree || {}, node.peek);
+    const ent = this.tree?.entities?.[id];
+    const zone = this.scene.safe_zone || { x: 0, y: 0, side: 1000 };
+    const middleX = zone.x + zone.side / 2;
+    const middleY = zone.y + zone.side / 2;
+    let drawn = null;
+    let k = 1;
+    let cx = 0;
+    let cy = 0;
+
+    // Nothing to show when the path names no entity.
+    this.hidePeek();
+    if ((ent != null) && (this.peekLayer != null)) {
+      drawn = this.look.drawEntity(ent);
+      k = PEEK_SIZE / Math.max(drawn.w, drawn.h, 1);
+      cx = node.x + (middleX - node.x) * PEEK_PULL;
+      cy = node.y + (middleY - node.y) * PEEK_PULL;
+      const g = s("g", {
+        class: "peek-card",
+        transform: `translate(${cx} ${cy})${this.upright(0, 0)}` +
+          ` scale(${k}) translate(${-drawn.w / 2} ${-drawn.h / 2})`,
+      });
+      g.append(drawn.node);
+      this.peekLayer.append(g);
+    }
+  }
+
+  /** Take away whatever a hovered node is showing. */
+  hidePeek() {
+    if (this.peekLayer != null) {
+      this.peekLayer.replaceChildren();
     }
   }
 
@@ -740,9 +813,17 @@ export class SceneView {
    */
   drawPlacemats(g) {
     const places = this.tree?.places || {};
+    const occupied = [];
+
+    // The seats someone, or a bot, sits in, for mats with no places.
+    for (const seat of this.app.seats || []) {
+      if ((seat.account_name) || (seat.label)) {
+        occupied.push(String(seat.seat_id));
+      }
+    }
 
     for (const mat of this.scene.placemats || []) {
-      for (const seat of matSeats(mat, places)) {
+      for (const seat of matSeats(mat, places, occupied)) {
         this.drawPlacemat(g, mat, seat);
       }
     }
@@ -1096,6 +1177,7 @@ export class SceneView {
     if ((ent.hidden) && (ent.owner === this.app.seat)) {
       ret.classList.add("peek");
     }
+    this.wireTokenControl(ret, id);
 
     // The drawing, the area that catches the pointer, and the hint on
     // how to take it.
@@ -1106,6 +1188,26 @@ export class SceneView {
     }
 
     return ret;
+  }
+
+  /**
+   * Have a click on a token carry out the control the rules anchor on it
+   * without a drag (turning over a drawn card), when there is one. A
+   * control the rules would refuse leaves it clickable, with the reason.
+   *
+   * @param {SVGGElement} group the token's group
+   * @param {string} id the token's id
+   */
+  wireTokenControl(group, id) {
+    const control = (this.app.controls || []).find((c) => (
+      (c.anchor === id) &&
+      (!c.interactive)
+    ));
+
+    if (control) {
+      group.classList.add("clickable");
+      group.addEventListener("click", (e) => this.onPlaceClick(e, control));
+    }
   }
 
   drawMarks(g, tree) {
