@@ -26,6 +26,8 @@ class App {
   constructor() {
     this.root = document.getElementById("app");
     this.net = new Net();
+    this.mainNet = this.net;             // this device's own connection; this.net is the player on screen
+    this.guests = [];                    // hot seat: other players on this device, each {name, net}
     this.cache = new FileCache(this.net);
     this.text = new Text();
     this.account = null;
@@ -92,6 +94,11 @@ class App {
   }
 
   onClosed() {
+    // the other players on this device go with the connection: they log in again
+    if (this.guests.length > 0) {
+      this.endHotseat();
+      toast("The other players on this device were logged out.", "warn");
+    }
     // the table screen is kept, with its state, so the server can send just what was missed once we are back
     const where = this.table ? { id: this.table.id, opts: this.table.opts, screen: this.table } : null;
     if (this.table) this.table.detach();
@@ -183,17 +190,31 @@ class App {
     const name = h("input", { type: "text", placeholder: "So the host knows who answered", maxlength: 64,
                                value: localStorage.getItem("dionysus.joinName") || "" });
     const err = h("p.error", { role: "alert" });
+    const working = h("p.waiting", { role: "status" });
+    const submit = h("button.primary.wide", { type: "submit" }, "Answer the invite");
     const answer = async (e) => {
       e?.preventDefault();
       err.textContent = "";
+      // Say the invite is received while the response is made, which takes
+      // a few seconds (it waits on the network to find our address).
+      working.textContent = "Got your invite. Hold on, I'm making your response…";
+      submit.disabled = true;
+      try {
+        await answerInvite();
+      } finally {
+        working.textContent = "";
+        submit.disabled = false;
+      }
+    };
+    const answerInvite = async () => {
       localStorage.setItem("dionysus.joinName", name.value.trim());
       // holding a key for this server, a new invite's re-dial details may be enough: no response code needed
       const envelope = await decode(pasted.value, "c").catch(() => null);
       const held = envelope?.rd && this.heldKey(envelope.srv);
       if (held) {
-        err.textContent = "Reconnecting…";
+        working.textContent = "Got your invite. Reconnecting you…";
         if (await this.redialWith(held, envelope.rd, 8000)) return;
-        err.textContent = "";
+        working.textContent = "Got your invite. Hold on, I'm making your response…";
       }
       try {
         const { response, envelope, connected } = await this.net.answer(pasted.value, { name: name.value.trim() || undefined,
@@ -212,7 +233,8 @@ class App {
         h("label.field", {}, h("span", {}, "Invite code from the host"), pasted),
         h("label.field", {}, h("span", {}, "Your name (optional)"), name),
         err,
-        h("button.primary.wide", { type: "submit" }, "Answer the invite")),
+        working,
+        submit),
       h("p.muted.small", {}, "You will get a code back to send to the host. Once they enter it, you are connected. Nothing passes through any server but theirs."))));
     if (code) answer();
     else pasted.focus();
@@ -220,6 +242,7 @@ class App {
 
   freshNet() {
     const net = new Net();
+    this.mainNet = net;
     // carry on numbering actions where the last connection stopped: the server answers a client_sequence it has seen with
     // that action's ack (a retry), so a new connection must not reuse one
     if (this.net) net.clientSequence = Math.max(net.clientSequence, this.net.clientSequence);
@@ -510,6 +533,148 @@ class App {
       }
     } catch (e) {
       toast(e.message, "error");
+    }
+  }
+
+  // ---------------------------------------------------------------- hot seat
+
+  /**
+   * Everyone who can play from this device, this device's own player
+   * first.
+   *
+   * @returns {Array<object>} {name, net, isActive} for each
+   */
+  hotseatPlayers() {
+    const ret = [{
+      name: this.account?.display_name || this.account?.username || "You",
+      net: this.mainNet,
+      isActive: (this.net === this.mainNet),
+    }];
+
+    for (const guest of this.guests) {
+      ret.push({
+        name: guest.name,
+        net: guest.net,
+        isActive: (this.net === guest.net),
+      });
+    }
+
+    return ret;
+  }
+
+  /**
+   * Whether more players can be seated at this device: a table is open
+   * and the connection is a direct one (a WebRTC host's other players
+   * would each need an invite).
+   *
+   * @returns {boolean} whether they can
+   */
+  canAddHotseatPlayer() {
+    return ((this.table != null) && (this.mainNet.mode === "websocket"));
+  }
+
+  /**
+   * Ask who is joining at this device, log them in on a connection of
+   * their own and check they hold a seat at the open table. They are
+   * switched to straight away.
+   */
+  async addHotseatPlayer() {
+    const user = h("input", { name: "username", autocomplete: "off" });
+    const pass = h("input", { name: "password", type: "password", autocomplete: "off" });
+    const form = h(
+      "div.form",
+      {},
+      h("p.muted", {}, "They must already have a seat at this table. They are logged in only while the table is open here."),
+      h("label.field", {}, h("span", {}, "Username"), user),
+      h("label.field", {}, h("span", {}, "Password"), pass),
+    );
+    const ok = await dialog("Add a player at this device", form, [["Log in", true, "primary"], ["Cancel", false]]);
+    let net = null;
+    let login = null;
+    let joined = null;
+    let guest = null;
+
+    if (ok) {
+      net = new Net();
+      net.clientSequence = this.net.clientSequence;
+      net.frameHandlers.add((frame) => this.cache.onFrame(frame));
+      try {
+        await net.connect();
+        login = await net.request("account.login", { username: user.value.trim(), password: pass.value });
+        joined = await net.request("tables.join", { table_id: this.table.id, view: "both" });
+        if (joined.seat == null) {
+          throw new Error(`${login.account.display_name || login.account.username} has no seat at this table`);
+        }
+        guest = { name: login.account.display_name || login.account.username, net };
+        net.addEventListener("closed", () => this.dropGuest(guest));
+        net.addEventListener("notice", (e) => this.onNotice(e.detail));
+        this.guests.push(guest);
+        await this.switchPlayer(net);
+      } catch (e) {
+        net.closeTransport();
+        toast(e.message, "warn");
+      }
+    }
+  }
+
+  /**
+   * Show the table as another player on this device sees it. Their
+   * connection gets the table; nothing the last player saw is kept.
+   *
+   * @param {Net} net the player's connection
+   */
+  async switchPlayer(net) {
+    const screen = this.table;
+
+    if ((screen != null) && (net !== this.net)) {
+      this.net = net;
+      this.cache.net = net;
+      screen.attach(net);
+      screen.viewerPreferences.net = net;
+      // A snapshot, not the changes since the last player's: this player
+      // sees different things.
+      screen.state = null;
+      screen.lastSequence = 0;
+      screen.opts = { view: screen.view };
+      try {
+        await screen.start();
+      } catch (e) {
+        toast(e.message, "error");
+      }
+    }
+  }
+
+  /**
+   * A player on this device is no longer connected: take them out, and
+   * go back to this device's own player if they were on screen.
+   *
+   * @param {object} guest the player
+   */
+  async dropGuest(guest) {
+    const was = (this.net === guest.net);
+
+    this.guests = this.guests.filter((x) => x !== guest);
+    if (was) {
+      toast(`${guest.name} was disconnected.`, "warn");
+      await this.switchPlayer(this.mainNet);
+    } else if ((this.table != null) && (this.table.snap != null)) {
+      this.table.renderHeader();
+    }
+  }
+
+  /**
+   * Log every other player out of this device and drop their
+   * connections, going back to this device's own connection.
+   */
+  endHotseat() {
+    const guests = this.guests;
+
+    this.guests = [];
+    this.net = this.mainNet;
+    this.cache.net = this.mainNet;
+    for (const guest of guests) {
+      guest.net.request("account.logout").catch(() => {});
+      guest.net.closeTransport();
     }
   }
 
@@ -941,7 +1106,21 @@ class App {
     const botSeats = h("div.row");
     const count = h("input", { type: "number", value: 20, min: 1, max: 1000 });
     const rows = autoplay.runs.map((run) => this.adminAutoplayRow(run));
+    const tournaments = (autoplay.tournaments || []).map(
+      (tournament) => h(
+        "tr",
+        {},
+        h("td", {}, `all bots ${tournament.tournament_id}`),
+        h("td", {}, tournament.game_id),
+        h("td", {}, tournament.status),
+        h("td", {}, `${tournament.runs_done}/${tournament.runs_total} runs`),
+        h("td.small.muted", {}, `${tournament.bots.length} bots`),
+        h("td", {}, tournament.error || ""),
+        h("td", {}, this.adminTournamentStop(tournament)),
+      ),
+    );
     let start = null;
+    let startAll = null;
 
     // Offer a bot for each seat of the chosen game.
     gameSelect.addEventListener(
@@ -978,13 +1157,41 @@ class App {
       "Start",
     );
 
+    // Start a tournament: every bot of the game against the others, with
+    // the matches shared out among the seatings of each group.
+    startAll = h(
+      "button",
+      {
+        title: "Every available bot against the others, in turn",
+        onclick: async () => {
+          try {
+            await this.net.request(
+              "admin.autoplay.start_all",
+              {
+                game_id: gameSelect.value,
+                players: botSeats.querySelectorAll("select").length,
+                matches: Number(count.value),
+              },
+            );
+            toast("Started.");
+            this.admin();
+          } catch (e) {
+            toast(e.message, "error");
+          }
+        },
+      },
+      "All bots",
+    );
+
     return adminSection(
       "Automatic play",
       h(
         "p.muted",
         {},
         "Seat only bots and let matches play out, to build a rating " +
-        "baseline. They count toward ratings like any match.",
+        "baseline. They count toward ratings like any match. All bots " +
+        "plays every bot of the game against the others, the matches " +
+        "counted for each group of bots.",
       ),
       h(
         "div.row",
@@ -993,8 +1200,9 @@ class App {
         botSeats,
         h("label.field.inline", {}, h("span", {}, "matches"), count),
         start,
+        startAll,
       ),
-      h("table.admin-table", {}, h("tbody", {}, rows)),
+      h("table.admin-table", {}, h("tbody", {}, tournaments, rows)),
     );
   }
 
@@ -1026,6 +1234,35 @@ class App {
       pickers.push(h("select", { dataset: { i } }, options));
     }
     clear(botSeats, pickers);
+  }
+
+  /**
+   * A Stop button for an all-bots tournament while it runs, which stops
+   * the run in play and starts no more.
+   *
+   * @param {object} tournament the tournament
+   * @returns {HTMLElement|null} the button, or null when it is over
+   */
+  adminTournamentStop(tournament) {
+    let ret = null;
+
+    if (tournament.status === "running") {
+      ret = h(
+        "button.ghost.small",
+        {
+          onclick: async () => {
+            await this.net.request(
+              "admin.autoplay.stop",
+              { tournament_id: tournament.tournament_id },
+            );
+            this.admin();
+          },
+        },
+        "Cancel",
+      );
+    }
+
+    return ret;
   }
 
   /**

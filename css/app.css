@@ -286,6 +286,9 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .hand-card.new { transform: translateY(-8px); filter: drop-shadow(0 0 1.5px var(--accent)) drop-shadow(0 0 1.5px var(--accent)) drop-shadow(0 2px 3px rgb(0 0 0 / 0.25)); }
 .hand-card.new:hover { transform: translateY(-14px); }
 .hand-card .card-svg { width: 100%; height: auto; display: block; }
+/* a finger moving sideways on a card scrolls the hand; moving up or down is the card's own drag (table.js) */
+.hand-card[draggable="true"] { touch-action: pan-x; -webkit-touch-callout: none; user-select: none; }
+.touch-ghost { position: fixed; z-index: 1000; pointer-events: none; opacity: 0.85; transform: translate(-50%, -60%); margin: 0; }
 /* A card dragged off the board: the hand panel lights up to take it, and a picture of the card follows the pointer
    once it leaves the board (which clips the card itself). */
 .hand-panel { position: relative; }
@@ -423,6 +426,9 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .table-side > .controls:empty { display: none; }
 .table-side > .controls button { flex: 1 1 auto; }
 .table-side > .controls button.big { font-size: 1rem; padding: 8px 14px; min-height: 40px; }
+.hand-panel > .controls { gap: 8px; min-height: 0; margin-bottom: 8px; }
+.hand-panel > .controls:empty { display: none; }
+.hand-panel > .controls button.big { font-size: 1rem; padding: 8px 14px; min-height: 40px; }
 .table-side > .values-panel { flex: none; padding: 10px 12px; }
 .table-side > .values-panel .hand-value-text { order: 1; flex-basis: 100%; }
 /* in one column the whole body scrolls, so the hand is never clipped and the controls follow right below it */

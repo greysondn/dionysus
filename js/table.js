@@ -100,6 +100,7 @@ export class TableScreen {
   destroy() {
     this.detach();
     this.projector.leave();
+    this.app.endHotseat();
   }
 
   get seat() { return this.snap?.seat_id ?? null; }
@@ -697,7 +698,12 @@ export class TableScreen {
           above = this.stateEl;
         }
         main.append(above, this.panes.divider("hand"), this.handEl);
-        side.append(this.controlsEl, this.valuesEl);
+        // The controls go with the hand when the game asks, else at the
+        // top of the side panel.
+        if (!this.controlsInHand()) {
+          side.append(this.controlsEl);
+        }
+        side.append(this.valuesEl);
         if (this.scene != null) {
           side.append(this.stateEl);
         }
@@ -1174,11 +1180,52 @@ export class TableScreen {
    */
   headerTools() {
     return [
+      ...this.hotseatTools(),
       ...this.matchTools(),
       ...this.boardTools(),
       ...this.tableTools(),
       ...this.recordTools(),
     ];
+  }
+
+  /**
+   * The hot seat: a button for each player on this device, the one on
+   * screen lit, and one to add another. Seated viewers only, since each
+   * player must hold a seat here.
+   *
+   * @returns {Array<HTMLElement>} the tools
+   */
+  hotseatTools() {
+    const ret = [];
+    const players = this.app.hotseatPlayers();
+    let style = "";
+
+    if (this.seat != null) {
+      // Who is on screen, when there is more than one.
+      if (players.length > 1) {
+        for (const player of players) {
+          style = "ghost";
+          if (player.isActive) {
+            style = "primary";
+          }
+          ret.push(h("button", {
+            class: style,
+            title: `Show the table as ${player.name} sees it`,
+            onclick: () => this.app.switchPlayer(player.net),
+          }, player.name));
+        }
+      }
+
+      // Adding one.
+      if (this.app.canAddHotseatPlayer()) {
+        ret.push(h("button.ghost", {
+          title: "Seat another player at this device: they log in, and you switch between players",
+          onclick: () => this.app.addHotseatPlayer(),
+        }, "Add player"));
+      }
+    }
+
+    return ret;
   }
 
   /**
@@ -1959,6 +2006,7 @@ export class TableScreen {
   renderHand() {
     let mine = [];
     let canPlay = false;
+    let docked = false;
 
     if (this.handEl != null) {
       // The places to show.
@@ -1966,22 +2014,41 @@ export class TableScreen {
         mine = this.handPlaces();
       }
 
-      // Hidden when there is nothing to show.
-      if (mine.length === 0) {
+      // Hidden when there is nothing to show: no places, and no controls
+      // docked with them.
+      docked = ((this.view === "both") && (this.controlsInHand()));
+      if ((mine.length === 0) && (!docked)) {
         this.handEl.hidden = true;
       } else {
         this.handEl.hidden = false;
         canPlay = this.controls.some((control) => (
           control.action_type === "tabletop.play"
         ));
-        // The first place's head carries Commit play and Cancel.
-        clear(this.handEl, mine.map(([pid, ids], index) => (
-          this.handBlock(pid, ids, canPlay, (index === 0))
-        )));
+        // The controls, when docked, come first. The first place's head
+        // carries Commit play and Cancel.
+        clear(
+          this.handEl,
+          mine.map(([pid, ids], index) => (
+            this.handBlock(pid, ids, canPlay, (index === 0))
+          )),
+        );
+        if (docked) {
+          this.handEl.prepend(this.controlsEl);
+        }
       }
     }
 
     this.renderValues();
+  }
+
+  /**
+   * Whether the game asks for its controls to sit with the hand in the
+   * combined view, not at the top of the side panel.
+   *
+   * @returns {boolean} whether it does
+   */
+  controlsInHand() {
+    return (this.snap?.game?.controls_in === "hand");
   }
 
   /**
@@ -2537,6 +2604,17 @@ export class TableScreen {
       ret.addEventListener("dragend", () => {
         this.draggedToken = null;
       });
+
+      // A finger can't start the browser's drag the way a mouse does (on
+      // Android it scrolls the hand instead), so a touch drags by its own
+      // pointer events.
+      if (draggable === "true") {
+        ret.addEventListener("pointerdown", (e) => {
+          if (e.pointerType === "touch") {
+            this.startTouchDrag(e, ret, id);
+          }
+        });
+      }
       ret.addEventListener("contextmenu", (e) => (
         this.handCardMenu(e, id, canPlay)
       ));
@@ -2550,6 +2628,79 @@ export class TableScreen {
     }
 
     return ret;
+  }
+
+  /**
+   * Drag a hand card by touch onto the table: a finger moving up from
+   * the card (sideways it scrolls the hand) carries a copy of the card,
+   * and lifting it over the table plays the card there, as a mouse drop
+   * does.
+   *
+   * @param {PointerEvent} down the touch that landed on the card
+   * @param {HTMLElement} card the card
+   * @param {string} id the token's id
+   */
+  startTouchDrag(down, card, id) {
+    const scene = this.sceneView;
+    const origin = { x: down.clientX, y: down.clientY };
+    let ghost = null;
+
+    // Where the finger is, as the scene's drop handlers read an event.
+    const dropEvent = (e) => ({
+      clientX: e.clientX,
+      clientY: e.clientY,
+      shiftKey: false,
+      preventDefault: () => {},
+      dataTransfer: { getData: () => "" },
+    });
+    const isOverScene = (e) => (
+      scene.svg.contains(document.elementFromPoint(e.clientX, e.clientY))
+    );
+    const move = (e) => {
+      if (e.pointerId === down.pointerId) {
+        // Pick the card up once the finger has gone a little way up or
+        // down: the browser takes sideways moves for scrolling.
+        if (
+          (ghost == null) &&
+          (Math.abs(e.clientY - origin.y) > 10)
+        ) {
+          ghost = card.cloneNode(true);
+          ghost.classList.add("touch-ghost");
+          ghost.style.width = `${card.getBoundingClientRect().width}px`;
+          document.body.append(ghost);
+        }
+        if (ghost != null) {
+          ghost.style.left = `${e.clientX}px`;
+          ghost.style.top = `${e.clientY}px`;
+          if (isOverScene(e)) {
+            scene.showMarker(dropEvent(e));
+          } else {
+            scene.clearMarker();
+          }
+        }
+      }
+    };
+    const finish = (e, isDrop) => {
+      if (e.pointerId === down.pointerId) {
+        removeEventListener("pointermove", move);
+        removeEventListener("pointerup", up);
+        removeEventListener("pointercancel", cancel);
+        if (ghost != null) {
+          ghost.remove();
+          scene.clearMarker();
+          if ((isDrop) && (isOverScene(e))) {
+            this.draggedToken = id;
+            scene.onDrop(dropEvent(e));
+          }
+        }
+      }
+    };
+    const up = (e) => finish(e, true);
+    const cancel = (e) => finish(e, false);
+
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", up);
+    addEventListener("pointercancel", cancel);
   }
 
   /**
