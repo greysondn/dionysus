@@ -48,7 +48,12 @@
 :root[data-theme="dark"] {
   --bg: #12100d; --bg-2: #1a1713; --panel: #1f1b16; --panel-2: #262119; --ink: #efe8da; --ink-2: #c9bfad;
   --muted: #978c7b; --line: #362f25; --accent: #e0b450; --accent-ink: #1b1408;
+  --felt: #1d4d33; --felt-2: #133524; --good: #5bb07d; --warn: #e0a24a; --bad: #e06b5f;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.3);
 }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+.auth-card .theme { float: right; }
 
 * { box-sizing: border-box; }
 html, body, #app { margin: 0; height: 100%; }
@@ -138,6 +143,16 @@ table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 td.number, .number { font-variant-numeric: tabular-nums; }
 .stat-block { margin-bottom: 16px; }
+.stats-view { display: flex; flex-direction: column; gap: 8px; }
+.stat-row { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.dist h5 { margin: 8px 0 4px; font-size: 0.95em; }
+.dist-rows { display: grid; grid-template-columns: max-content minmax(60px, 1fr) max-content max-content; gap: 2px 10px; align-items: center; max-width: 640px; }
+.dist-row { display: contents; }
+.dist-label { font-size: 0.85em; color: var(--muted); }
+.dist-bar { display: block; height: 10px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+.dist-bar span { display: block; height: 100%; background: var(--accent); }
+.dist-value { text-align: right; }
+.dist-share { text-align: right; min-width: 3.5em; }
 .admin-section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; overflow-x: auto; }
 .admin-table td { font-size: 0.92em; }
 .status { font-weight: 600; } .status.loaded { color: var(--good); } .status.broken { color: var(--bad); } .status.disabled { color: var(--muted); }
@@ -262,6 +277,17 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .scene .mark-text { font: 600 20px var(--font-ui); }
 .scene .stage-frame { fill: rgb(0 0 0 / 0.65); stroke: #f0d79a; stroke-width: 3; }
 .scene .reach { fill: rgb(255 209 102 / 0.12); stroke: #ffd166; stroke-width: 2; stroke-dasharray: 6 4; pointer-events: none; }
+.tool-bar { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 8px 6px; width: 84px; overflow-y: auto; background: var(--panel); color: var(--ink); border-right: 1px solid var(--line); }
+.tool-bar.folded { width: auto; padding: 8px 4px; background: transparent; border-right: 0; }
+.tool-bar button { width: 100%; text-align: left; white-space: nowrap; }
+.tool-bar button.fold { text-align: center; }
+.tool-bar.folded button.fold { width: auto; background: var(--panel); }
+.tool-bar .tool-group { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.tool-bar input[type="color"] { width: 100%; height: 32px; padding: 0; border: 1px solid var(--line); background: transparent; }
+.scene[data-tool="pen"], .scene[data-tool="ping"] { cursor: crosshair; }
+.scene[data-tool="pan"] { cursor: grab; }
+.scene[data-tool="pan"]:active { cursor: grabbing; }
+.scene[data-tool="pan"] .token, .scene[data-tool="pen"] .token, .scene[data-tool="ping"] .token { cursor: inherit; }
 .scene .ping {fill: none; stroke: #ffd166; stroke-width: 4; animation: ping 1.6s ease-out forwards; pointer-events: none; }
 @keyframes ping { from { r: 8; opacity: 1; } to { r: 90; opacity: 0; } }
 .scene .missing { opacity: 0.3; }

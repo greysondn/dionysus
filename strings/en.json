@@ -8,6 +8,7 @@
   "disclosure.seat_inheritance": "Whoever takes your seat next receives everything attached to it: its hand, sheet, journal, marks and plan.",
   "disclosure.public_ratings_stats": "Ratings and recorded stats are always visible to everyone and cannot be hidden.",
   "disclosure.admin_media": "The admin can see who uploaded any file, and can delete any file.",
+  "disclosure.join_response": "The response code you send the host contains your network addresses (your device's address on your network and, unless the server relays your connection, your public IP address), the name you entered, and a fingerprint of your connection. Only send it to a host you trust.",
 
   "core.seat.occupy": "Seat {seat} is taken.",
   "core.seat.vacate": "Seat {seat} is empty again.",

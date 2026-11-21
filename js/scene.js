@@ -3,6 +3,7 @@
 // token sends an action, and the token moves only when the server's patch says so.
 import { fanLayout, insertIndex, insertMarker, resolveLook } from "./fan.js";
 import { toScene, turnBack, turnedBox, turnTransform } from "./facing.js";
+import { stepZoom, windowFor } from "./viewport.js";
 import { takeIntoHand } from "./hand.js";
 import { referenceString } from "./layout.js";
 import {
@@ -114,6 +115,12 @@ export class SceneView {
     this.tool = "hand";
     this.pings = [];
 
+    // How far the board is zoomed in and what it is centred on (null: the
+    // middle), and the press that is panning it.
+    this.zoom = 1;
+    this.center = null;
+    this.panning = null;
+
     // Kept across renders, so a playing video is moved, not restarted:
     // the cue playing now, and what is on the stage (stage id to
     // {key, node, gone}).
@@ -140,9 +147,82 @@ export class SceneView {
   /** The scene, this display's preferences, and how far the view turns (clockwise degrees: 0, 90, 180 or 270), so
    * the viewer's side of the table is at the bottom. */
   setScene(scene, preferences, turn = 0) {
+    // A different board, or a different side to see it from, is seen whole.
+    if ((scene?.scene_key !== this.scene?.scene_key) || (turn !== this.turn)) {
+      this.zoom = 1;
+      this.center = null;
+    }
     this.scene = scene;
     this.preferences = preferences || {};
     this.turn = turn;
+  }
+
+  /**
+   * The tool in hand: "hand" (none: the board behaves as usual), "pen",
+   * "ping" or "pan". The scene's cursor follows it.
+   *
+   * @returns {string} the tool
+   */
+  get tool() {
+    return this.toolInHand;
+  }
+
+  set tool(name) {
+    this.toolInHand = name;
+    this.svg.dataset.tool = name;
+  }
+
+  /**
+   * Show the part of the board that is in view: the whole board, or a
+   * window onto it as far as it is zoomed in.
+   */
+  applyView() {
+    let view = null;
+
+    if (this.scene) {
+      view = windowFor(
+        turnedBox(this.scene.width, this.scene.height, this.turn || 0),
+        this.zoom,
+        this.center,
+      );
+      this.center = view.center;
+      this.svg.setAttribute("viewBox", view.box.join(" "));
+    }
+  }
+
+  /**
+   * Zoom the board in or out a step, about what is in the middle of the
+   * view, or show it whole again.
+   *
+   * @param {string} how "in", "out" or "reset"
+   */
+  zoomView(how) {
+    if (how === "reset") {
+      this.zoom = 1;
+      this.center = null;
+    } else if (how === "in") {
+      this.zoom = stepZoom(this.zoom, 1);
+    } else {
+      this.zoom = stepZoom(this.zoom, -1);
+    }
+    this.applyView();
+  }
+
+  /**
+   * Move the view across the board.
+   *
+   * @param {number} dx how far, in the board's units, to the right
+   * @param {number} dy how far down
+   */
+  panView(dx, dy) {
+    const now = windowFor(
+      turnedBox(this.scene.width, this.scene.height, this.turn || 0),
+      this.zoom,
+      this.center,
+    ).center;
+
+    this.center = { x: now.x + dx, y: now.y + dy };
+    this.applyView();
   }
 
   /** A pointer's position in the scene's own frame, whatever the view's turn. */
@@ -180,7 +260,7 @@ export class SceneView {
     const svg = this.svg;
     svg.replaceChildren();
     if (!sc) return;
-    svg.setAttribute("viewBox", turnedBox(sc.width, sc.height, this.turn || 0).join(" "));
+    this.applyView();
     const zone = sc.safe_zone;
     const tabletop = this.preferences.tabletop || sc.tabletop || { color: "#000000" };
     const defs = s("defs");
@@ -1223,7 +1303,7 @@ export class SceneView {
         g.append(s("text", { class: "mark-text", x: sh.x, y: sh.y, fill: sh.color || "#ffd166", transform: this.upright(sh.x, sh.y).trim() || null }, sh.text));
       }
     }
-    if (this.stroke) g.append(s("polyline", { class: "mark drawing", points: this.stroke.map((p) => p.join(",")).join(" "), stroke: this.app.penColor, "stroke-width": 4 }));
+    if (this.stroke) g.append(s("polyline", { class: "mark drawing", points: this.stroke.map((p) => p.join(",")).join(" "), stroke: this.app.userColor, "stroke-width": 4 }));
   }
 
   /** What media.show put on the stage. A video plays as the show says: once and then gone (the default), on a loop,
@@ -1340,6 +1420,7 @@ export class SceneView {
   ping(msg) {
     if (!this.pingLayer || msg.scene !== this.scene?.scene_key) return;
     const c = s("circle", { class: "ping", cx: msg.x, cy: msg.y, r: 10 });
+    if (/^#[0-9a-fA-F]{6}$/.test(msg.color || "")) c.style.stroke = msg.color;
     this.pingLayer.append(c);
     setTimeout(() => c.remove(), 1600);
   }
@@ -1351,8 +1432,9 @@ export class SceneView {
   }
 
   /**
-   * A press on the scene: Alt pings, the pen starts a stroke, and the
-   * hand picks up a token it may drag. The table view only watches.
+   * A press on the scene: Alt or the ping tool pings, the pan tool starts
+   * moving the board, the pen starts a stroke, and the hand picks up a
+   * token it may drag. The table view only watches.
    *
    * @param {PointerEvent} e the press
    */
@@ -1361,8 +1443,11 @@ export class SceneView {
 
     // Only the main button, and not from the table view.
     if ((e.button === 0) && (this.app.view !== "table")) {
-      if (e.altKey) {
+      if ((e.altKey) || (this.tool === "ping")) {
         this.app.ephemeral(this.scene.scene_key, p.x, p.y);
+      } else if (this.tool === "pan") {
+        this.panning = { x: e.clientX, y: e.clientY };
+        this.svg.setPointerCapture(e.pointerId);
       } else if (this.tool === "pen") {
         this.stroke = [[Math.round(p.x), Math.round(p.y)]];
         this.svg.setPointerCapture(e.pointerId);
@@ -1457,10 +1542,19 @@ export class SceneView {
     const d = this.drag;
     let p = this.pt(e);
     let last = null;
+    let scale = 1;
     let dx = 0;
     let dy = 0;
 
-    if (this.stroke) {
+    if (this.panning) {
+      // Carry the board along with the pointer: pixels to the board's units.
+      scale = this.svg.getScreenCTM()?.a || 1;
+      this.panView(
+        (this.panning.x - e.clientX) / scale,
+        (this.panning.y - e.clientY) / scale,
+      );
+      this.panning = { x: e.clientX, y: e.clientY };
+    } else if (this.stroke) {
       // Add a point once the pen has gone far enough.
       last = this.stroke[this.stroke.length - 1];
       if (Math.hypot(p.x - last[0], p.y - last[1]) > 3) {
@@ -1558,14 +1652,16 @@ export class SceneView {
     const points = this.stroke;
     const d = this.drag;
 
-    if (points) {
+    if (this.panning) {
+      this.panning = null;
+    } else if (points) {
       // Commit the stroke, if it is more than a dot.
       this.stroke = null;
       if (points.length > 1) {
         await this.app.commitMark({
           type: "stroke",
           points,
-          color: this.app.penColor,
+          color: this.app.userColor,
           width: 4,
         }, this.scene.scene_key);
       }

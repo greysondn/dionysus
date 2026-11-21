@@ -6,7 +6,9 @@ import { Net } from "./net.js";
 import { ReplayScreen } from "./replay.js";
 import { sha256Hex } from "./softcrypto.js";
 import { TableScreen } from "./table.js";
+import { statsView } from "./statsview.js";
 import { Text } from "./text.js";
+import { themeButton } from "./theme.js";
 import { bytes, clear, dialog, formatTime, h, toast } from "./ui.js";
 
 const TOKEN = "dionysus.session";               // one session per server: dionysus.session.<server_id>
@@ -227,6 +229,7 @@ class App {
     };
     clear(this.root, h("div.auth", {}, h("div.auth-card.wide", {},
       h("h1.brand", {}, "Dionysus"),
+      themeButton(),
       lost ? h("div.notice", {}, h("b", {}, "The connection was lost, "), "and reconnecting on its own did not work. Ask the host for a new invite code to rejoin; your game is safe on the server.")
         : h("p.muted", {}, "Join a game server with the invite code its host sent you."),
       h("form", { onsubmit: answer },
@@ -235,6 +238,7 @@ class App {
         err,
         working,
         submit),
+      h("p.notice", {}, this.text.t("disclosure.join_response")),
       h("p.muted.small", {}, "You will get a code back to send to the host. Once they enter it, you are connected. Nothing passes through any server but theirs."))));
     if (code) answer();
     else pasted.focus();
@@ -349,7 +353,7 @@ class App {
     const field = (label, input, hint) => h("label.field", {}, h("span", {}, label), input, hint ? h("small.muted", {}, hint) : null);
     clear(this.root, h("div.auth", {},
       h("div.auth-card", {},
-        h("h1.brand", {}, "Dionysus"), h("p.muted", {}, this.text.t("app.tagline")),
+        themeButton(), h("h1.brand", {}, "Dionysus"), h("p.muted", {}, this.text.t("app.tagline")),
         mode === "bootstrap" ? h("div.notice", {}, h("b", {}, "This server has no admin yet. "), "The first account becomes the admin. Use the one-time code the server printed when it started.") : null,
         h("form", { onsubmit: submit },
           field("Username", user),
@@ -373,7 +377,7 @@ class App {
       h("header.topbar", {},
         h("div.brand-small", {}, "Dionysus"),
         h("nav", {}, nav.map(([k, label]) => h("button", { class: k === active ? "nav on" : "nav", onclick: () => this.go(k) }, label))),
-        h("div.who", {}, h("span", {}, this.account.display_name), h("button.ghost.small", { onclick: () => this.logout() }, "Log out"))),
+        h("div.who", {}, h("span", {}, this.account.display_name), themeButton(), h("button.ghost.small", { onclick: () => this.logout() }, "Log out"))),
       h("main.page", {}, content)));
   }
 
@@ -855,31 +859,115 @@ class App {
 
   // ---------------------------------------------------------------- profile and leaderboards
 
+  /**
+   * Draw a player's profile: their ratings, their recorded stats for each
+   * game and across all of them, and their recent matches.
+   *
+   * @param {string} accountId the player, or nothing for the viewer
+   */
   async profile(accountId) {
-    const r = await this.net.request("profile.get", accountId ? { account_id: accountId } : {});
-    const me = !accountId || accountId === this.account.id;
-    const games = Object.entries(r.ratings);
-    const statsBy = {};
-    for (const s of r.stats) (statsBy[s.game_id] ??= []).push(s);
-    const nameInput = h("input", { value: r.account.display_name });
-    this.shell("profile", h("div.profile", {},
-      h("h2", {}, r.account.display_name, r.account.is_bot ? h("span.badge", {}, "bot") : null, r.account.is_admin ? h("span.badge", {}, "admin") : null),
-      h("p.muted", {}, this.text.t("disclosure.public_ratings_stats")),
-      me ? h("details", {}, h("summary", {}, "Account"),
-        h("div.form", {},
-          h("label.field", {}, h("span", {}, "Display name"), nameInput),
-          h("button", { onclick: async () => { this.account = await this.net.request("account.update", { display_name: nameInput.value }); toast("Saved."); } }, "Save"),
-          h("button.ghost", { onclick: () => this.changePassword() }, "Change password"))) : null,
-      h("h3", {}, "Ratings"),
-      games.length ? h("div.rating-grid", {}, games.map(([g, ratings]) => h("article.rating-card", {}, h("h4", {}, this.gameName(g)),
-        Object.entries(ratings).map(([k, v]) => h("div.rating-row", {}, h("span.muted", {}, k.split(":")[1].replace(/_/g, " ")), h("b", {}, v.text), h("span.muted.small", {}, `${v.matches} matches`)))))) :
-        h("p.muted", {}, "No rated matches yet."),
-      h("h3", {}, "Recorded stats"),
-      Object.keys(statsBy).length ? Object.entries(statsBy).map(([g, rows]) => h("div.stat-block", {}, h("h4", {}, this.gameName(g)),
-        h("table.stats", {}, h("tbody", {}, rows.map((s) => h("tr", {}, h("th", {}, s.name), h("td", {}, s.bucket ? `[${s.bucket}]` : ""), h("td.number", {}, fmt(s.value)), h("td.muted.small", {}, `${s.samples} samples`))))))) :
-        h("p.muted", {}, "None yet."),
-      r.recent.length ? [h("h3", {}, "Recent matches"), h("ul.recent", {}, r.recent.map((m) => h("li", {}, `${m.table} (${this.gameName(m.game_id)}) · ${m.competitive?.rank ? `placed ${m.competitive.rank}` : "unranked"} · ${formatTime(m.ended_at)} `,
-        h("button.ghost.small", { onclick: () => this.chooseReplay(m.table_id, m.number) }, "Replay"))))] : null));
+      let params = {};
+      if (accountId) {
+          params = { account_id: accountId };
+      }
+      const r = await this.net.request("profile.get", params);
+      const me = ((!accountId) || (accountId === this.account.id));
+      const nameInput = h("input", { value: r.account.display_name });
+      const badges = [];
+      const parts = [];
+
+      // Who they are.
+      if (r.account.is_bot) {
+          badges.push(h("span.badge", {}, "bot"));
+      }
+      if (r.account.is_admin) {
+          badges.push(h("span.badge", {}, "admin"));
+      }
+      parts.push(h("h2", {}, r.account.display_name, ...badges));
+      parts.push(h("p.muted", {}, this.text.t("disclosure.public_ratings_stats")));
+      if (me) {
+          parts.push(h("details", {}, h("summary", {}, "Account"),
+              h("div.form", {},
+                  h("label.field", {}, h("span", {}, "Display name"), nameInput),
+                  h("button", { onclick: async () => { this.account = await this.net.request("account.update", { display_name: nameInput.value }); toast("Saved."); } }, "Save"),
+                  h("button.ghost", { onclick: () => this.changePassword() }, "Change password"))));
+      }
+
+      // What they have done.
+      parts.push(h("h3", {}, "Ratings"));
+      parts.push(this.profileRatings(r));
+      parts.push(h("h3", {}, "Recorded stats"));
+      parts.push(this.profileStats(r));
+      if (r.recent.length > 0) {
+          parts.push(h("h3", {}, "Recent matches"));
+          parts.push(h("ul.recent", {}, r.recent.map((m) => h("li", {}, `${m.table} (${this.gameName(m.game_id)}) · ${this.placing(m)} · ${formatTime(m.ended_at)} `,
+              h("button.ghost.small", { onclick: () => this.chooseReplay(m.table_id, m.number) }, "Replay")))));
+      }
+      this.shell("profile", h("div.profile", {}, ...parts));
+  }
+
+  /**
+   * Draw a player's ratings, a card for each game.
+   *
+   * @param {object} r the profile
+   * @returns {HTMLElement} the ratings
+   */
+  profileRatings(r) {
+      const games = Object.entries(r.ratings);
+      let ret = h("p.muted", {}, "No rated matches yet.");
+
+      if (games.length > 0) {
+          ret = h("div.rating-grid", {}, games.map(([g, ratings]) => h("article.rating-card", {}, h("h4", {}, this.gameName(g)),
+              Object.entries(ratings).map(([k, v]) => h("div.rating-row", {}, h("span.muted", {}, k.split(":")[1].replace(/_/g, " ")), h("b", {}, v.text), h("span.muted.small", {}, `${v.matches} matches`))))));
+      }
+
+      return ret;
+  }
+
+  /**
+   * Draw a player's recorded stats: a block for each game, then a block
+   * of what they have done across every game.
+   *
+   * @param {object} r the profile
+   * @returns {HTMLElement} the stats
+   */
+  profileStats(r) {
+      const byGame = {};
+      const blocks = [];
+
+      for (const s of r.stats) {
+          if (byGame[s.game_id] === undefined) {
+              byGame[s.game_id] = [];
+          }
+          byGame[s.game_id].push(s);
+      }
+      for (const [g, rows] of Object.entries(byGame)) {
+          blocks.push(h("div.stat-block", {}, h("h4", {}, this.gameName(g)), statsView(rows)));
+      }
+      if (r.global.length > 0) {
+          blocks.push(h("div.stat-block", {}, h("h4", {}, "Across every game"), statsView(r.global)));
+      }
+      if (blocks.length === 0) {
+          blocks.push(h("p.muted", {}, "None yet."));
+      }
+
+      return h("div.stat-blocks", {}, ...blocks);
+  }
+
+  /**
+   * How a player placed in a recent match.
+   *
+   * @param {object} m the match, as the profile lists it
+   * @returns {string} "placed 2", or "unranked"
+   */
+  placing(m) {
+      let ret = "unranked";
+
+      if ((m.competitive) && (m.competitive.rank)) {
+          ret = `placed ${m.competitive.rank}`;
+      }
+
+      return ret;
   }
 
   async changePassword() {
@@ -916,21 +1004,70 @@ class App {
     return this.games.find((g) => g.game_id === id)?.name || id;
   }
 
+  /**
+   * Draw a game's leaderboard, its challenges, and the stats across
+   * everyone who plays it.
+   *
+   * @param {string} gameId the game, or nothing for the first
+   */
   async leaderboards(gameId) {
-    gameId = gameId || this.games[0]?.game_id;
-    const select = h("select", {}, this.games.map((g) => h("option", { value: g.game_id, selected: g.game_id === gameId }, g.name)));
-    select.addEventListener("change", () => this.leaderboards(select.value));
-    const [board, global] = await Promise.all([this.net.request("leaderboard.get", { game_id: gameId }), this.net.request("stats.global", { game_id: gameId })]);
-    const game = this.games.find((g) => g.game_id === gameId);
-    this.shell("leaderboards", h("div.boards", {},
-      h("div.section-head", {}, h("h2", {}, "Leaderboards"), select),
-      board.rows.length ? h("table.board", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Player"), h("th", {}, "Rating"), h("th", {}, "Track"), h("th", {}, "Matches"))),
-        h("tbody", {}, board.rows.map((r, i) => h("tr", {}, h("td", {}, i + 1),
-          h("td", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.go("profile", r.account_id); } }, r.account), r.is_bot ? h("span.badge", {}, "bot") : null),
-          h("td.number", {}, r.text), h("td.muted", {}, r.track.replace(/_/g, " ")), h("td.number", {}, r.matches))))) : h("p.muted", {}, "No rated matches of this game yet."),
-      game?.challenges?.length ? [h("h3", {}, "Challenges"), h("ul", {}, game.challenges.map((c) => h("li", {}, `${c.name}: ${Object.values(c.ratings)[0] ? Math.round(Object.values(c.ratings)[0].value) : "unrated"}`)))] : null,
-      global.stats.length ? [h("h3", {}, "Across everyone who plays it"), h("table.stats", {}, h("tbody", {}, global.stats.map((s) =>
-        h("tr", {}, h("th", {}, s.key.split(":")[1]), h("td", {}, s.bucket ? `[${s.bucket}]` : ""), h("td.number", {}, fmt(s.value)), h("td.muted", {}, s.holder ? `held by ${s.holder}` : "")))))] : null));
+      const chosen = gameId || this.games[0]?.game_id;
+      const select = h("select", {}, this.games.map((g) => h("option", { value: g.game_id, selected: g.game_id === chosen }, g.name)));
+      const [board, global] = await Promise.all([this.net.request("leaderboard.get", { game_id: chosen }), this.net.request("stats.global", { game_id: chosen })]);
+      const game = this.games.find((g) => g.game_id === chosen);
+      const parts = [h("div.section-head", {}, h("h2", {}, "Leaderboards"), select)];
+
+      select.addEventListener("change", () => this.leaderboards(select.value));
+      if (board.rows.length > 0) {
+          parts.push(h("table.board", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Player"), h("th", {}, "Rating"), h("th", {}, "Track"), h("th", {}, "Matches"))),
+              h("tbody", {}, board.rows.map((r, i) => h("tr", {}, h("td", {}, i + 1),
+                  h("td", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.go("profile", r.account_id); } }, r.account), ...this.botBadge(r)),
+                  h("td.number", {}, r.text), h("td.muted", {}, r.track.replace(/_/g, " ")), h("td.number", {}, r.matches))))));
+      } else {
+          parts.push(h("p.muted", {}, "No rated matches of this game yet."));
+      }
+      if ((game?.challenges) && (game.challenges.length > 0)) {
+          parts.push(h("h3", {}, "Challenges"));
+          parts.push(h("ul", {}, game.challenges.map((c) => h("li", {}, this.challengeText(c)))));
+      }
+      if (global.stats.length > 0) {
+          parts.push(h("h3", {}, "Across everyone who plays it"));
+          parts.push(statsView(global.stats));
+      }
+      this.shell("leaderboards", h("div.boards", {}, ...parts));
+  }
+
+  /**
+   * The badge a bot's name carries on a leaderboard.
+   *
+   * @param {object} row the leaderboard row
+   * @returns {Array<HTMLElement>} the badge, or nothing for a person
+   */
+  botBadge(row) {
+      const ret = [];
+
+      if (row.is_bot) {
+          ret.push(h("span.badge", {}, "bot"));
+      }
+
+      return ret;
+  }
+
+  /**
+   * A challenge and its rating, or that it has none yet.
+   *
+   * @param {object} c the challenge, as the game lists it
+   * @returns {string} the text
+   */
+  challengeText(c) {
+      const rating = Object.values(c.ratings)[0];
+      let ret = `${c.name}: unrated`;
+
+      if (rating) {
+          ret = `${c.name}: ${Math.round(rating.value)}`;
+      }
+
+      return ret;
   }
 
   // ---------------------------------------------------------------- admin

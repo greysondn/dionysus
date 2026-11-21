@@ -36,6 +36,7 @@ import {
 } from "./turn.js";
 import { channelVolume, focusStar, playMedia, SceneView } from "./scene.js";
 import { PaneSizer } from "./panes.js";
+import { ToolBar } from "./toolbar.js";
 import { PlacePicker } from "./pick.js";
 import { expansionsOn, houseRulesIn } from "./rules.js";
 import { apply } from "./patch.js";
@@ -59,6 +60,12 @@ export class TableScreen {
     this.viewerPreferences = new ViewerPreferences(app.net, tableId);     // every viewer choice at this table, in one place
     this.viewerPreferences.addEventListener("change", (e) => this.onPreferencesChange(e.detail.what));
     this.sceneView = new SceneView(this, this.look);
+    this.toolBar = new ToolBar({
+      canMark: () => this.canMark(),
+      onTool: (tool) => { this.sceneView.tool = tool; },
+      onZoom: (how) => this.sceneView.zoomView(how),
+      onErase: (e) => this.eraseMenu(e),
+    });
     this.projector = new Projector(this);
     this.state = null;
     this.seats = [];
@@ -68,7 +75,6 @@ export class TableScreen {
     this.votes = new Map();
     this.view = opts.view || "both";
     this.showGrid = true;
-    this.penColor = "#ffd166";
     this.personalMarks = [];
     this.cueQueue = [];              // visual cues waiting their turn, for this viewer only
     this.cueNow = null;
@@ -438,7 +444,26 @@ export class TableScreen {
 
   ephemeral(scene, x, y) {
     if (!this.feature("marks")) return;
-    this.net.send({ type: "ephemeral", table_id: this.id, kind: "ping", scene, x, y });
+    this.net.send({ type: "ephemeral", table_id: this.id, kind: "ping", scene, x, y, color: this.userColor });
+  }
+
+  /**
+   * The viewer's colour, which the pen and the ping use: the one they
+   * picked on the tool bar, kept in this browser.
+   *
+   * @returns {string} the colour, "#" and six hex digits
+   */
+  get userColor() {
+    return this.toolBar.color;
+  }
+
+  /**
+   * Whether the viewer may mark the board: a seat at a table with marks.
+   *
+   * @returns {boolean} whether they may
+   */
+  canMark() {
+    return ((this.seat != null) && (this.feature("marks")));
   }
 
   async commitMark(shape, scene) {
@@ -640,7 +665,9 @@ export class TableScreen {
       this.panes.addEventListener("change", () => this.renderHeader());
     }
 
-    // Lay them out for the view.
+    // Lay them out for the view. The tool bar belongs to the combined view
+    // alone, so it is taken from the scene in the others.
+    this.toolBar.el.remove();
     switch (this.view) {
       case "table":
         if (this.scene != null) {
@@ -696,6 +723,9 @@ export class TableScreen {
           above = this.sceneView.el;
         } else {
           above = this.stateEl;
+        }
+        if (this.scene != null) {
+          above.prepend(this.toolBar.el);
         }
         main.append(above, this.panes.divider("hand"), this.handEl);
         // The controls go with the hand when the game asks, else at the
@@ -945,6 +975,9 @@ export class TableScreen {
   renderHeader() {
     const game = this.snap.game;
     const isTucked = this.isTucked();
+
+    // What the viewer may do with the tool bar can change with the seat.
+    this.toolBar.render();
     let who = " · table view";
     let headerTurn = null;
 
@@ -1278,14 +1311,14 @@ export class TableScreen {
   }
 
   /**
-   * The board's tools, where there is a board and it shows: the side to
-   * view it from, the grid, and for a seat at a table with marks the pen.
+   * The board's tools in the header, where there is a board and it shows:
+   * the side to view it from, and the grid. The pen, the eraser and the
+   * rest are on the tool bar of the combined view.
    *
    * @returns {Array<HTMLElement>} the tools
    */
   boardTools() {
     const ret = [];
-    let penClass = "ghost";
 
     if ((this.scene != null) && (this.view !== "hand")) {
       // Where it is seen from, and its grid.
@@ -1294,22 +1327,6 @@ export class TableScreen {
         onclick: () => this.toggleGrid(),
         title: "Show or hide the grid",
       }, "Grid"));
-
-      // The pen, lit while it is in hand.
-      if ((this.seat != null) && (this.feature("marks"))) {
-        if (this.sceneView.tool === "pen") {
-          penClass = "ghost on";
-        }
-        ret.push(h("button.ghost", {
-          class: penClass,
-          onclick: () => this.togglePen(),
-          title: "Draw on the board",
-        }, "Pen"));
-        ret.push(h("button.ghost", {
-          onclick: (e) => this.eraseMenu(e),
-          title: "Erase marks on the board",
-        }, "Erase"));
-      }
     }
 
     return ret;
@@ -1321,18 +1338,6 @@ export class TableScreen {
   toggleGrid() {
     this.showGrid = !this.showGrid;
     this.renderScene();
-  }
-
-  /**
-   * Pick up the pen, or put it down for the hand.
-   */
-  togglePen() {
-    if (this.sceneView.tool === "pen") {
-      this.sceneView.tool = "hand";
-    } else {
-      this.sceneView.tool = "pen";
-    }
-    this.renderHeader();
   }
 
   /**
