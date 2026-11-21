@@ -1,5 +1,6 @@
 // The client shell: a connection, a file cache, text, and the screens. It runs no game code: everything game-
 // specific arrives as data (layouts, templates, controls, text keys) and is drawn by the generic renderer.
+import { botLabel, sortBots } from "./botrank.js";
 import { FileCache } from "./cache.js";
 import { CodeError, TARGET_CHARS, decode } from "./handshake.js";
 import { Net } from "./net.js";
@@ -515,7 +516,7 @@ class App {
       name.value = g.name;
       clear(bots, Array.from({ length: Math.max(0, Number(players.value) - 1) }, (_, i) =>
         h("label.field.inline", {}, h("span", {}, `Seat ${i + 2 + (gm.checked ? 1 : 0)}`),
-          h("select", { dataset: { seat: i + 2 + (gm.checked ? 1 : 0) } }, h("option", { value: "" }, "a person"), (g.bots || []).map((b) => h("option", { value: b }, `bot: ${b}`))))));
+          h("select", { dataset: { seat: i + 2 + (gm.checked ? 1 : 0) } }, h("option", { value: "" }, "a person"), sortBots(g.bots || [], g.bot_ranks).map((b) => h("option", { value: b }, botLabel(b, g.bot_ranks, "bot: ")))))));
     };
     select.addEventListener("change", update);
     players.addEventListener("input", update);

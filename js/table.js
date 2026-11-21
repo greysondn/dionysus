@@ -1,5 +1,6 @@
 // A table: the connection gate, the snapshot and its patches, and the three views (table, hand, both).
 import { animationOf } from "./animation.js";
+import { botLabel, sortBots } from "./botrank.js";
 import { GameLook, referenceString } from "./layout.js";
 import { Projector } from "./projection.js";
 import { openDisclosures } from "./disclosures.js";
@@ -1786,7 +1787,9 @@ export class TableScreen {
   }
 
   botPicker(seat) {
-    const select = h("select", {}, h("option", { value: "" }, `Seat ${seat}…`), (this.snap.game.bots || []).map((b) => h("option", { value: b }, b)));
+    const game = this.snap.game;
+    const select = h("select", {}, h("option", { value: "" }, `Seat ${seat}…`),
+      sortBots(game.bots || [], game.bot_ranks).map((b) => h("option", { value: b }, botLabel(b, game.bot_ranks))));
     select.addEventListener("change", () => select.value && this.net.request("tables.seat_bot", { table_id: this.id, seat, bot_id: select.value }).catch((e) => toast(e.message, "warn")));
     return select;
   }
