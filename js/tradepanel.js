@@ -5,7 +5,7 @@
 // everyone owns and what to start from), and by keeping the trade on the
 // table, in a form the panel can draw, at mechanics/<id>/trade_view.
 
-import { clear, h } from "./ui.js";
+import { clear, h, icon } from "./ui.js";
 
 /** The mechanic that keeps the trade on the table. */
 const MECHANIC = "monopoly.rules";
@@ -339,7 +339,7 @@ export class TradePanel {
             {},
             this.head(left),
             rightHead,
-            h("button.close", { type: "button", "aria-label": "Close", onclick: () => this.close() }, "✕"),
+            h("button.close", { type: "button", "aria-label": "Close", onclick: () => this.close() }, icon("icon_cross")),
         );
     }
 

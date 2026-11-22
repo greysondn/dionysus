@@ -10,8 +10,7 @@ import { TableScreen } from "./table.js";
 import { TournamentWatcher } from "./spectate.js";
 import { POPULATIONS, statsView } from "./statsview.js";
 import { Text } from "./text.js";
-import { themeButton } from "./theme.js";
-import { bytes, clear, dialog, formatTime, h, toast } from "./ui.js";
+import { bytes, clear, dialog, formatTime, h, icon, toast } from "./ui.js";
 
 const TOKEN = "dionysus.session";               // one session per server: dionysus.session.<server_id>
 const KEY = "dionysus.redial";                  // a reconnect key and the details to re-dial, per server: dionysus.redial.<server_id>
@@ -232,7 +231,6 @@ class App {
     };
     clear(this.root, h("div.auth", {}, h("div.auth-card.wide", {},
       h("h1.brand", {}, "Dionysus"),
-      themeButton(),
       lost ? h("div.notice", {}, h("b", {}, "The connection was lost, "), "and reconnecting on its own did not work. Ask the host for a new invite code to rejoin; your game is safe on the server.")
         : h("p.muted", {}, "Join a game server with the invite code its host sent you."),
       h("form", { onsubmit: answer },
@@ -356,7 +354,7 @@ class App {
     const field = (label, input, hint) => h("label.field", {}, h("span", {}, label), input, hint ? h("small.muted", {}, hint) : null);
     clear(this.root, h("div.auth", {},
       h("div.auth-card", {},
-        themeButton(), h("h1.brand", {}, "Dionysus"), h("p.muted", {}, this.text.t("app.tagline")),
+        h("h1.brand", {}, "Dionysus"), h("p.muted", {}, this.text.t("app.tagline")),
         mode === "bootstrap" ? h("div.notice", {}, h("b", {}, "This server has no admin yet. "), "The first account becomes the admin. Use the one-time code the server printed when it started.") : null,
         h("form", { onsubmit: submit },
           field("Username", user),
@@ -380,7 +378,7 @@ class App {
       h("header.topbar", {},
         h("div.brand-small", {}, "Dionysus"),
         h("nav", {}, nav.map(([k, label]) => h("button", { class: k === active ? "nav on" : "nav", onclick: () => this.go(k) }, label))),
-        h("div.who", {}, h("span", {}, this.account.display_name), themeButton(), h("button.ghost.small", { onclick: () => this.logout() }, "Log out"))),
+        h("div.who", {}, h("span", {}, this.account.display_name), h("button.ghost.small", { onclick: () => this.logout() }, icon("hexagon_out"), "Log out"))),
       h("main.page", {}, content)));
   }
 
@@ -2030,15 +2028,49 @@ async function fetchJSON(url, timeoutMs = 4000) {
   }
 }
 
+/** The Admin sections that start folded, until the person opens them. */
+const ADMIN_FOLDED = ["Plugins"];
+
 /**
- * One section of the Admin page: a heading, then its body.
+ * One section of the Admin page: a heading that folds the body away, then
+ * the body. Whether it is open is kept in this browser, per heading.
  *
  * @param {string} title the section's heading
  * @param {...*} body what goes under the heading
  * @returns {HTMLElement} the section
  */
 function adminSection(title, ...body) {
-  return h("section.admin-section", {}, h("h3", {}, title), body);
+    const key = `dionysus.admin.${title}`;
+    let isOpen = !ADMIN_FOLDED.includes(title);
+    let saved = null;
+
+    // The kept choice, where this browser lets us read one.
+    try {
+        saved = localStorage.getItem(key);
+    } catch {
+        saved = null;
+    }
+    if (saved !== null) {
+        isOpen = (saved === "open");
+    }
+
+    const ret = h(
+        "details.admin-section",
+        {
+            open: isOpen,
+            ontoggle: () => {
+                try {
+                    localStorage.setItem(key, ret.open ? "open" : "folded");
+                } catch {
+                    // A browser that keeps nothing just forgets.
+                }
+            },
+        },
+        h("summary", {}, h("h3", {}, title)),
+        body,
+    );
+
+    return ret;
 }
 
 function fmt(v) {

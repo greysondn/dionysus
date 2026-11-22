@@ -45,6 +45,21 @@ export function s(tag, attrs = {}, ...children) {
   return el;
 }
 
+/**
+ * An icon from the sprite in lattice/icons.svg (Kenney's, kept by
+ * tools/sync_lattice.py). It keeps its own colours.
+ *
+ * @param {string} name the symbol id, such as "icon_cog"
+ * @returns {SVGElement} the icon, sized by the .icon rule
+ */
+export function icon(name) {
+    const ret = s("svg", { class: "icon", "aria-hidden": "true" });
+
+    ret.append(s("use", { href: `lattice/icons.svg#${name}` }));
+
+    return ret;
+}
+
 let toastBox;
 export function toast(text, kind = "info", ms = 4200) {
   if (!toastBox) {

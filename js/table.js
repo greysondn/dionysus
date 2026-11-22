@@ -44,10 +44,20 @@ import { TradePanel } from "./tradepanel.js";
 import { PlacePicker } from "./pick.js";
 import { expansionsOn, houseRulesIn } from "./rules.js";
 import { apply } from "./patch.js";
-import { bytes, clear, dialog, h, s, schemaForm, toast } from "./ui.js";
+import { bytes, clear, dialog, h, icon, s, schemaForm, toast } from "./ui.js";
 
 /** How long a card that just came into the viewer's hand stays marked. */
 const NEW_CARD_MS = 10000;
+
+// The role a toast takes from the event it announces: a match beginning or
+// ending went well, a match abandoned or a refusal is a warning. Any other
+// event (a vote, say) is plain info.
+const TOAST_KINDS = {
+    "match.begin": "success",
+    "match.end": "success",
+    "match.abandon": "warn",
+    "core.rejected": "warn",
+};
 
 /** Where this browser keeps whether the header is tucked away. */
 const TUCKED_KEY = "dionysus.headerTucked";
@@ -434,7 +444,7 @@ export class TableScreen {
       (ev.event_type?.startsWith("match.")) ||
       (ev.event_type === "core.rejected")
     ) {
-      toast(line);
+      toast(line, TOAST_KINDS[ev.event_type] || "info");
     }
   }
 
@@ -1102,7 +1112,7 @@ export class TableScreen {
       h("button.ghost.tuck", {
         onclick: () => this.setTucked(false),
         title: "Show the header, its tools and the seats again",
-      }, "▾ Show"),
+      }, icon("keyboard_arrow_down"), "Show"),
     );
     this.renderTurn();
   }
@@ -1122,7 +1132,7 @@ export class TableScreen {
           "Tuck the header and the seats away, to give the board more" +
           " room (kept in this browser)"
         ),
-      }, "▴ Tuck");
+      }, icon("keyboard_arrow_up"), "Tuck");
     }
 
     return ret;
@@ -1327,10 +1337,11 @@ export class TableScreen {
         ret.push(h("button.ghost", {
           onclick: () => this.act("undo.request"),
           title: "Undo the last action (by the table's undo rule)",
-        }, "Undo"));
+        }, icon("arrow_counterclockwise"), "Undo"));
         ret.push(h(
           "button.ghost",
           { onclick: () => this.act("redo.request") },
+          icon("arrow_clockwise"),
           "Redo",
         ));
       }
@@ -1345,8 +1356,9 @@ export class TableScreen {
         end,
       ));
       ret.push(h(
-        "button.ghost",
+        "button.danger",
         { onclick: () => this.act("match.abandon") },
+        icon("flag_square"),
         "Abandon",
       ));
     }
@@ -1529,6 +1541,7 @@ export class TableScreen {
     ret.push(h(
       "button.ghost",
       { onclick: () => this.openSettings() },
+      icon("icon_cog"),
       "Settings",
     ));
     if (

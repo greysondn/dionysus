@@ -62,6 +62,31 @@ const PENDING_HINT = (
   " Drag it onto your hand, or right-click, to take it back."
 );
 
+/**
+ * Whether a point is inside a region (a polygon of [x, y] points), by
+ * counting how many of its edges a ray going right from the point crosses.
+ *
+ * @param {{x: number, y: number}} p the point
+ * @param {number[][]} region the polygon's corners
+ * @returns {boolean} whether the point is inside
+ */
+export function insideRegion(p, region) {
+  let ret = false;
+  let j = region.length - 1;
+
+  for (let i = 0; i < region.length; i++) {
+    const [xi, yi] = region[i];
+    const [xj, yj] = region[j];
+
+    if (((yi > p.y) !== (yj > p.y)) && (p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi)) {
+      ret = !ret;
+    }
+    j = i;
+  }
+
+  return ret;
+}
+
 /** This viewer's volume for a channel (ambience, music, effects), 0 to 1. */
 export function channelVolume(channel) {
   return Number(localStorage.getItem(`dionysus.volume.${channel || "effects"}`) ?? 0.8);
@@ -140,9 +165,15 @@ export class SceneView {
     this.cue = null;
     this.stageItems = new Map();
 
+    // The nodes that peek at an entity, and the one the pointer is over.
+    this.peekNodes = [];
+    this.peeked = null;
+
     // The pointer, and drops from the hand.
     this.svg.addEventListener("pointerdown", (e) => this.onDown(e));
     this.svg.addEventListener("pointermove", (e) => this.onMove(e));
+    this.svg.addEventListener("pointermove", (e) => this.updatePeek(e));
+    this.svg.addEventListener("pointerleave", () => this.leavePeek());
     this.svg.addEventListener("pointerup", (e) => this.onUp(e));
     this.svg.addEventListener("contextmenu", (e) => this.onContext(e));
     this.svg.addEventListener("dblclick", (e) => this.onDouble(e));
@@ -298,6 +329,8 @@ export class SceneView {
     turned.append(content);
     const layers = [...(sc.layers?.length ? sc.layers : [{ key: "board", kind: "board", z: 0 }, { key: "tokens", kind: "tokens", z: 1 }, { key: "annotations", kind: "annotations", z: 2 }])]
       .sort((a, b) => a.z - b.z);
+    this.peekNodes = [];
+    this.peeked = null;
     for (const layer of layers) {
       const g = s("g", { class: `layer layer-${layer.kind}`, "data-layer": layer.key });
       content.append(g);
@@ -464,10 +497,13 @@ export class SceneView {
 
   /**
    * A node's region that shows the entity the node peeks at while the
-   * pointer is over it, such as a property's deed over its space.
+   * pointer is over it, such as a property's deed over its space. The
+   * region itself is unseen: what is over it is found from the pointer's
+   * position (see updatePeek), because tokens lying on the node, such as
+   * a dungeon's cards, would take the pointer from the region.
    *
    * @param {object} node the node, with a region and a peek path
-   * @returns {SVGPolygonElement} the region, unseen but hoverable
+   * @returns {SVGPolygonElement} the region, unseen
    */
   peekRegion(node) {
     const ret = s("polygon", {
@@ -475,10 +511,38 @@ export class SceneView {
       class: "graph-peek",
     });
 
-    ret.addEventListener("pointerenter", () => this.showPeek(node));
-    ret.addEventListener("pointerleave", () => this.hidePeek());
+    this.peekNodes.push(node);
 
     return ret;
+  }
+
+  /**
+   * Show what the node under the pointer peeks at, and take it away
+   * when the pointer leaves the node. Not while something is carried.
+   *
+   * @param {PointerEvent} e the pointer's move
+   */
+  updatePeek(e) {
+    let found = null;
+
+    if ((this.peekNodes.length > 0) && (!this.drag) && (!this.panning)) {
+      const p = this.pt(e);
+      found = this.peekNodes.find((node) => insideRegion(p, node.region)) || null;
+      if (found !== this.peeked) {
+        this.peeked = found;
+        if (found != null) {
+          this.showPeek(found);
+        } else {
+          this.hidePeek();
+        }
+      }
+    }
+  }
+
+  /** The pointer has left the scene: take away whatever it was peeking at. */
+  leavePeek() {
+    this.peeked = null;
+    this.hidePeek();
   }
 
   /**
