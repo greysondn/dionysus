@@ -8,7 +8,7 @@ import { ReplayScreen } from "./replay.js";
 import { sha256Hex } from "./softcrypto.js";
 import { TableScreen } from "./table.js";
 import { TournamentWatcher } from "./spectate.js";
-import { statsView } from "./statsview.js";
+import { POPULATIONS, statsView } from "./statsview.js";
 import { Text } from "./text.js";
 import { themeButton } from "./theme.js";
 import { bytes, clear, dialog, formatTime, h, toast } from "./ui.js";
@@ -1029,18 +1029,28 @@ class App {
   async leaderboards(gameId) {
       const chosen = gameId || this.games[0]?.game_id;
       const select = h("select", {}, this.games.map((g) => h("option", { value: g.game_id, selected: g.game_id === chosen }, g.name)));
-      const [board, global] = await Promise.all([this.net.request("leaderboard.get", { game_id: chosen }), this.net.request("stats.global", { game_id: chosen })]);
+      // Users, bots or both, kept while the viewer looks at other games.
+      const population = POPULATIONS.find((p) => p.value === this.statsPopulation) || POPULATIONS[0];
+      const filter = h("select", { "aria-label": "Show figures for" }, POPULATIONS.map((p) => h("option", { value: p.value, selected: p.value === population.value }, p.label)));
+      const [board, global] = await Promise.all([
+          this.net.request("leaderboard.get", { game_id: chosen, population: population.value }),
+          this.net.request("stats.global", { game_id: chosen, population: population.value }),
+      ]);
       const game = this.games.find((g) => g.game_id === chosen);
-      const parts = [h("div.section-head", {}, h("h2", {}, "Leaderboards"), select)];
+      const parts = [h("div.section-head", {}, h("h2", {}, "Leaderboards"), h("div.filters", {}, select, filter))];
 
       select.addEventListener("change", () => this.leaderboards(select.value));
+      filter.addEventListener("change", () => {
+          this.statsPopulation = filter.value;
+          this.leaderboards(select.value);
+      });
       if (board.rows.length > 0) {
           parts.push(h("table.board", {}, h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Player"), h("th", {}, "Rating"), h("th", {}, "Track"), h("th", {}, "Matches"))),
               h("tbody", {}, board.rows.map((r, i) => h("tr", {}, h("td", {}, i + 1),
                   h("td", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.go("profile", r.account_id); } }, r.account), ...this.botBadge(r)),
                   h("td.number", {}, r.text), h("td.muted", {}, r.track.replace(/_/g, " ")), h("td.number", {}, r.matches))))));
       } else {
-          parts.push(h("p.muted", {}, "No rated matches of this game yet."));
+          parts.push(h("p.muted", {}, population.none));
       }
       if ((game?.challenges) && (game.challenges.length > 0)) {
           parts.push(h("h3", {}, "Challenges"));

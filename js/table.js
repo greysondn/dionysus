@@ -40,6 +40,7 @@ import {
 import { channelVolume, focusStar, playMedia, SceneView } from "./scene.js";
 import { PaneSizer } from "./panes.js";
 import { ToolBar } from "./toolbar.js";
+import { TradePanel } from "./tradepanel.js";
 import { PlacePicker } from "./pick.js";
 import { expansionsOn, houseRulesIn } from "./rules.js";
 import { apply } from "./patch.js";
@@ -63,6 +64,7 @@ export class TableScreen {
     this.viewerPreferences = new ViewerPreferences(app.net, tableId);     // every viewer choice at this table, in one place
     this.viewerPreferences.addEventListener("change", (e) => this.onPreferencesChange(e.detail.what));
     this.sceneView = new SceneView(this, this.look);
+    this.tradePanel = new TradePanel(this);
     this.toolBar = new ToolBar({
       canMark: () => this.canMark(),
       onTool: (tool) => { this.sceneView.tool = tool; },
@@ -975,6 +977,7 @@ export class TableScreen {
     if (!this.scene || !this.state) return;
     this.sceneView.setScene(this.scene, this.display, SIDE_TURNS[this.side()]);
     this.sceneView.render(this.state);
+    this.tradePanel.sync();
     if (this.projecting) this.projector.layout();
   }
 
@@ -1944,6 +1947,10 @@ export class TableScreen {
   }
 
   async runControl(c) {
+    // A control that carries a trade panel opens it in place of a form.
+    if (c.params_schema?.["x-trade"]) {
+      return this.tradePanel.edit(c);
+    }
     const needs = c.params_schema?.required?.filter((k) => !(k in (c.params || {}))) || [];
     if (c.confirm) {
       const ok = await dialog(this.text.t(c.label), h("p", {}, "Are you sure?"), [["Yes", true, "danger"], ["No", false]]);

@@ -7,6 +7,16 @@
 import { h } from "./ui.js";
 
 /**
+ * Whose figures a stats screen can show, as the server names them, with the
+ * words on the filter and what to say when nobody of that kind has played.
+ */
+export const POPULATIONS = [
+    { value: "all", label: "Users and bots", none: "No rated matches of this game yet." },
+    { value: "users", label: "Users only", none: "No users have a rated match of this game yet." },
+    { value: "bots", label: "Bots only", none: "No bots have a rated match of this game yet." },
+];
+
+/**
  * The aggregate whose buckets are counts, so that each is a share of the
  * whole.
  */

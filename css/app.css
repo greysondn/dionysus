@@ -127,6 +127,7 @@ button[data-refused]:active { transform: none; }
 .topbar button.nav.on { background: rgb(255 255 255 / 0.1); border-color: rgb(240 215 154 / 0.5); }
 .topbar .who { display: flex; gap: 10px; align-items: center; }
 .page { padding: 24px 20px 48px; max-width: 1180px; width: 100%; margin: 0 auto; }
+.section-head .filters { display: flex; gap: 8px; flex-wrap: wrap; }
 .section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 8px 0 12px; flex-wrap: wrap; }
 .lobby section { margin-bottom: 32px; }
 .table-list { display: grid; gap: 10px; }
@@ -570,3 +571,41 @@ span.ok { color: var(--good); font-weight: 600; }
 .spectate { height: 100%; display: flex; flex-direction: column; }
 .spectate > .table-screen { height: auto; flex: 1 1 auto; min-height: 0; }
 .spectate-bar { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+
+/* The trade panel: two equal columns drawn over the middle of the board, in the board's own green and black. */
+.trade-panel { position: absolute; z-index: 20; box-sizing: border-box; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; padding: 0.5em 0.7em 0.4em; background: #cce7cf; color: #000; border: 0.15em solid #000; box-shadow: 0 0 0 0.15em #cce7cf, 0 0 0 0.3em #000; font-family: Kabel, Futura, "Century Gothic", "Trebuchet MS", sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; user-select: none; overflow: hidden; }
+.trade-panel[hidden] { display: none; }
+.trade-panel * { box-sizing: border-box; }
+.trade-panel .heads, .trade-panel .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.9em; min-height: 0; }
+.trade-panel .heads { position: relative; padding-right: 1.6em; }
+.trade-panel .head { display: flex; align-items: center; gap: 0.4em; min-width: 0; border-bottom: 0.15em solid #000; padding-bottom: 0.2em; font-size: 1em; }
+.trade-panel .head .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1em; }
+.trade-panel .head .tag { font-size: 0.55em; letter-spacing: 0.1em; }
+.trade-panel button { font: inherit; text-transform: uppercase; letter-spacing: inherit; color: inherit; background: none; border: 0.1em solid transparent; cursor: pointer; padding: 0 0.3em; }
+.trade-panel button:hover:not(:disabled) { background: #000; color: #cce7cf; }
+.trade-panel button:disabled { opacity: 0.3; cursor: default; }
+.trade-panel .close { position: absolute; right: 0; top: 0; }
+.trade-panel .col { border: 0.1em solid #000; border-top: 0; overflow-y: auto; min-height: 0; background: rgb(255 255 255 / 0.18); }
+.trade-panel .col.drop { background: rgb(0 0 0 / 0.12); outline: 0.15em dashed #000; outline-offset: -0.3em; }
+.trade-panel .row { display: flex; align-items: center; gap: 0.5em; padding: 0.25em 0.45em; font-size: 0.75em; cursor: pointer; }
+.trade-panel .row:hover { background: #000; color: #cce7cf; }
+.trade-panel .row .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trade-panel .row .value { font-variant-numeric: tabular-nums; }
+.trade-panel .row .pip { flex: none; width: 1em; height: 1em; border: 0.12em solid #000; display: grid; place-items: center; }
+.trade-panel .row:hover .pip { border-color: #cce7cf; }
+.trade-panel .row .pip svg { width: 0.7em; height: 0.7em; }
+.trade-panel .row .pip.cash { border-style: dashed; }
+.trade-panel .row.offered { opacity: 0.45; text-decoration: line-through; }
+.trade-panel .row.received { cursor: default; background: rgb(0 0 0 / 0.14); }
+.trade-panel .row.locked { opacity: 0.5; cursor: not-allowed; }
+.trade-panel .row.nothing { cursor: default; opacity: 0.6; }
+.trade-panel .row input { width: 6em; font: inherit; text-align: right; border: 0.1em solid #000; background: #fff; color: #000; }
+.trade-panel .sep { border-top: 0.1em solid rgb(0 0 0 / 0.4); margin: 0.3em 0.45em; font-size: 0.55em; letter-spacing: 0.14em; }
+.trade-panel .summary { display: flex; flex-direction: column; border: 0.1em solid #000; margin-top: 0.5em; padding: 0.2em 0.6em; height: 6.5em; min-height: 0; background: rgb(255 255 255 / 0.28); }
+.trade-panel .summary .lines { flex: 1; min-height: 0; overflow-y: auto; }
+.trade-panel .summary .title { display: flex; justify-content: space-between; font-size: 0.55em; letter-spacing: 0.14em; border-bottom: 0.15em solid #000; margin-bottom: 0.2em; }
+.trade-panel .summary .line { font-size: 0.7em; padding: 0.05em 0; }
+.trade-panel .summary .line b { text-decoration: underline; text-underline-offset: 0.15em; }
+.trade-panel .summary .none { font-size: 0.65em; opacity: 0.6; padding: 0.3em 0; }
+.trade-panel .actions { display: flex; justify-content: flex-end; gap: 1.2em; padding-top: 0.4em; font-size: 1em; }
+.trade-panel .actions .status { flex: 1; align-self: center; font-size: 0.55em; letter-spacing: 0.12em; opacity: 0.7; }
