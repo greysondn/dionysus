@@ -27,6 +27,18 @@ import { h, s, toast } from "./ui.js";
 /** px a fan's drop area reaches past each of its ends. */
 const FAN_OVERHANG = 24;
 
+/** How many rings a "ping me" closes in with. */
+const PING_ME_RINGS = 3;
+
+/** How far out, in scene px, a "ping me" ring starts (css keeps the same). */
+const PING_ME_FROM = 130;
+
+/** How long one ring takes to close in, ms (css keeps the same). */
+const PING_ME_MS = 1400;
+
+/** How long after one ring the next starts, ms. */
+const PING_ME_STAGGER_MS = 350;
+
 /** A grid's cell size, in px, when it doesn't say. */
 const DEFAULT_CELL_SIZE = 70;
 
@@ -1419,10 +1431,34 @@ export class SceneView {
 
   ping(msg) {
     if (!this.pingLayer || msg.scene !== this.scene?.scene_key) return;
+    if (msg.kind === "pingme") {
+      this.pingMeRings(msg);
+      return;
+    }
     const c = s("circle", { class: "ping", cx: msg.x, cy: msg.y, r: 10 });
     if (/^#[0-9a-fA-F]{6}$/.test(msg.color || "")) c.style.stroke = msg.color;
     this.pingLayer.append(c);
     setTimeout(() => c.remove(), 1600);
+  }
+
+  /**
+   * "Ping me" on a token: rings that close in on it, one after another, so
+   * the eye is led to where it stands. The rings are drawn above the
+   * tokens, so a token under them never hides them.
+   *
+   * @param {object} msg the ping: scene, x, y and optionally color
+   */
+  pingMeRings(msg) {
+    const rings = [];
+
+    for (let i = 0; i < PING_ME_RINGS; i += 1) {
+      const ring = s("circle", { class: "ping-me", cx: msg.x, cy: msg.y, r: PING_ME_FROM });
+      ring.style.animationDelay = `${i * PING_ME_STAGGER_MS}ms`;
+      if (/^#[0-9a-fA-F]{6}$/.test(msg.color || "")) ring.style.stroke = msg.color;
+      this.pingLayer.append(ring);
+      rings.push(ring);
+    }
+    setTimeout(() => rings.forEach((ring) => ring.remove()), PING_ME_MS + PING_ME_RINGS * PING_ME_STAGGER_MS);
   }
 
   // ---------------------------------------------------------------- interaction

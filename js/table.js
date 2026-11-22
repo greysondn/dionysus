@@ -479,13 +479,13 @@ export class TableScreen {
     );
 
     for (const spot of spots) {
-      this.ephemeral(scene, spot.x, spot.y);
+      this.ephemeral(scene, spot.x, spot.y, "pingme");
     }
   }
 
-  ephemeral(scene, x, y) {
+  ephemeral(scene, x, y, kind = "ping") {
     if (!this.feature("marks")) return;
-    this.net.send({ type: "ephemeral", table_id: this.id, kind: "ping", scene, x, y, color: this.userColor });
+    this.net.send({ type: "ephemeral", table_id: this.id, kind, scene, x, y, color: this.userColor });
   }
 
   /**

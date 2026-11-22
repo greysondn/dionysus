@@ -281,7 +281,7 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .scene .mark-text { font: 600 20px var(--font-ui); }
 .scene .stage-frame { fill: rgb(0 0 0 / 0.65); stroke: #f0d79a; stroke-width: 3; }
 .scene .reach { fill: rgb(255 209 102 / 0.12); stroke: #ffd166; stroke-width: 2; stroke-dasharray: 6 4; pointer-events: none; }
-.tool-bar { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 8px 6px; width: 84px; overflow-y: auto; background: var(--panel); color: var(--ink); border-right: 1px solid var(--line); }
+.tool-bar { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 8px 6px; width: 96px; overflow-y: auto; background: var(--panel); color: var(--ink); border-right: 1px solid var(--line); }
 .tool-bar.folded { width: auto; padding: 8px 4px; background: transparent; border-right: 0; }
 .tool-bar button { width: 100%; text-align: left; white-space: nowrap; }
 .tool-bar button.fold { text-align: center; }
@@ -294,6 +294,8 @@ svg.scene { width: 100%; height: 100%; flex: 1; touch-action: none; user-select:
 .scene[data-tool="pan"] .token, .scene[data-tool="pen"] .token, .scene[data-tool="ping"] .token { cursor: inherit; }
 .scene .ping {fill: none; stroke: #ffd166; stroke-width: 4; animation: ping 1.6s ease-out forwards; pointer-events: none; }
 @keyframes ping { from { r: 8; opacity: 1; } to { r: 90; opacity: 0; } }
+.scene .ping-me { fill: none; stroke: #ffd166; stroke-width: 5; opacity: 0; animation: ping-me 1.4s ease-in forwards; pointer-events: none; }
+@keyframes ping-me { 0% { r: 130; opacity: 0; } 20% { opacity: 1; } 100% { r: 18; opacity: 0.9; } }
 .scene .missing { opacity: 0.3; }
 
 /* hand */

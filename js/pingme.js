@@ -34,7 +34,14 @@ function isMine(entity, declaration, tree, seat) {
         ret = false;
     } else if (declaration.side_value != null) {
         side = tree?.values?.[declaration.side_value]?.[String(seat)];
-        ret = ((side != null) && (entity.side === side));
+
+        // A game may write the value and the side in different case
+        // (Monopoly's seat color is "Blue", its pawn's side "blue").
+        ret = (
+            (side != null) &&
+            (String(entity.side).toLowerCase() ===
+                String(side).toLowerCase())
+        );
     } else {
         ret = (entity.owner === seat);
     }
