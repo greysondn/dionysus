@@ -75,7 +75,8 @@ function keep(key, value) {
  *
  * Hooks: canMark() says whether the viewer may mark the board; onTool(id)
  * is told which tool is in hand; onZoom("in", "out" or "reset") zooms the
- * board; onErase(event) opens the erase menu.
+ * board; onErase(event) opens the erase menu; canPingMe() says whether the
+ * game provides "ping me" and onPingMe() pings the viewer's own tokens.
  */
 export class ToolBar {
     /**
@@ -150,6 +151,9 @@ export class ToolBar {
             if ((canMark) || (!tool.marks)) {
                 parts.push(this.toolButton(tool));
             }
+            if ((canMark) && (tool.id === "ping")) {
+                parts.push(this.pingMeButton());
+            }
         }
         if (canMark) {
             parts.push(h("button.ghost.small.tool", {
@@ -186,6 +190,29 @@ export class ToolBar {
             "aria-pressed": String(this.tool === tool.id),
             onclick: () => this.select(tool.id),
         }, `${tool.glyph} ${tool.label}`);
+    }
+
+    /**
+     * The "ping me" button, beside the Ping tool. It is an action, not a
+     * tool in hand. A game that does not provide it gets the button
+     * anyway, disabled, so players can see it exists.
+     *
+     * @returns {HTMLElement} the button
+     */
+    pingMeButton() {
+        const isProvided = this.hooks.canPingMe();
+        let title = "This game has nothing to ping for you";
+
+        if (isProvided) {
+            title = "Ping your own pieces on the board, in your colour";
+        }
+
+        return h("button.ghost.small.tool.ping-me", {
+            type: "button",
+            title,
+            disabled: (!isProvided),
+            onclick: () => this.hooks.onPingMe(),
+        }, "◎ Ping me");
     }
 
     /**

@@ -66,7 +66,7 @@ export class ReplayScreen extends TableScreen {
     this.display = {};
     this.controls = [];
     this.status = r.table.status;
-    this.text.seatName = (n) => this.seatName(n);
+    this.text.seatName = (n, name) => this.seatName(n, name);
     try {
       await this.look.load(this.manifest);
       this.lookLoaded = true;

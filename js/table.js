@@ -21,6 +21,8 @@ import { openLook } from "./look.js";
 import { ViewerPreferences } from "./preferences.js";
 import { SIDE_TURNS, SIDES, sideFor } from "./facing.js";
 import { myPending, othersPending } from "./pending.js";
+import { seatTitle, occupantOf } from "./seatnames.js";
+import { pingMeSpots, providesPingMe } from "./pingme.js";
 import {
   endTurnControl,
   isRefused,
@@ -66,6 +68,8 @@ export class TableScreen {
       onTool: (tool) => { this.sceneView.tool = tool; },
       onZoom: (how) => this.sceneView.zoomView(how),
       onErase: (e) => this.eraseMenu(e),
+      canPingMe: () => providesPingMe(this.snap?.game?.ping_me),
+      onPingMe: () => this.pingMe(),
     });
     this.projector = new Projector(this);
     this.state = null;
@@ -112,9 +116,26 @@ export class TableScreen {
 
   get seat() { return this.snap?.seat_id ?? null; }
   isGM() { return this.seats.find((x) => x.seat_id === this.seat)?.role === "gm"; }
-  seatName(n) {
-    const seat = this.seats.find((x) => x.seat_id === Number(n));
-    return seat?.account_name || seat?.label || `Seat ${n}`;
+  /**
+   * A seat's name, with the player now in it after: "Seat 1 (Foo)".
+   *
+   * @param {number|string} n the seat's number
+   * @param {string|null} name what the game calls the seat, when it says
+   * @returns {string} the name
+   */
+  seatName(n, name = null) {
+    return seatTitle(this.seats, n, name);
+  }
+
+  /**
+   * The player in a seat alone, for where the seat's own name is already
+   * drawn (a placemat's name label).
+   *
+   * @param {number|string} n the seat's number
+   * @returns {string} the player's name, else the seat's name
+   */
+  occupantName(n) {
+    return occupantOf(this.seats, n) ?? seatTitle(this.seats, n);
   }
 
   async start() {
@@ -264,7 +285,7 @@ export class TableScreen {
     this.display = snap.display || {};
     this.status = snap.table?.status;
     this.app.cache.setKeys(snap.keys);
-    this.text.seatName = (n) => this.seatName(n);
+    this.text.seatName = (n, name) => this.seatName(n, name);
     if (!this.lookLoaded) {
       try {
         await this.look.load(this.manifest);
@@ -441,6 +462,25 @@ export class TableScreen {
     const ack = await this.net.action(this.id, type, params);
     if (ack.outcome === "rejected") toast(ack.reason || "That was refused.", "warn");
     return ack;
+  }
+
+  /**
+   * Ping the viewer's own tokens on the board, as the game declared them
+   * (ping_me), each in the viewer's colour. Others at the scene see them
+   * as they see any ping.
+   */
+  pingMe() {
+    const scene = this.scene?.scene_key;
+    const spots = pingMeSpots(
+      this.state,
+      this.snap?.game?.ping_me,
+      this.seat,
+      scene,
+    );
+
+    for (const spot of spots) {
+      this.ephemeral(scene, spot.x, spot.y);
+    }
   }
 
   ephemeral(scene, x, y) {
@@ -3137,7 +3177,47 @@ export class TableScreen {
     const sheets = this.renderSheets();
     if (!show.length && !sheets) { this.stateEl.hidden = true; return; }
     this.stateEl.hidden = false;
-    clear(this.stateEl, show.map((id) => h("div.mechanic", {}, h("h3", {}, this.text.has(`${id}.title`) ? this.text.t(`${id}.title`) : id), this.renderValue(mechanics[id], id))), sheets);
+    clear(this.stateEl, show.map((id) => this.mechanicBox(id, mechanics[id])), sheets);
+  }
+
+  /**
+   * One mechanic's data as a collapsible box. It starts collapsed, so a
+   * game's raw data doesn't overwhelm players; a box the viewer opens
+   * stays open through the redraws that follow each state change.
+   *
+   * @param {string} id the mechanic's id
+   * @param {object} value the mechanic's data
+   * @returns {HTMLElement} the box
+   */
+  mechanicBox(id, value) {
+    let title = id;
+
+    // Remember which boxes the viewer has opened.
+    if (this.openMechanics === undefined) {
+      this.openMechanics = new Set();
+    }
+
+    // Its title, from the game's text where it has one.
+    if (this.text.has(`${id}.title`)) {
+      title = this.text.t(`${id}.title`);
+    }
+
+    const box = h(
+      "details.mechanic",
+      {},
+      h("summary", {}, h("h3", {}, title)),
+      this.renderValue(value, id),
+    );
+    box.open = this.openMechanics.has(id);
+    box.addEventListener("toggle", () => {
+      if (box.open) {
+        this.openMechanics.add(id);
+      } else {
+        this.openMechanics.delete(id);
+      }
+    });
+
+    return box;
   }
 
   /** Every entity with stats, as the server computed them: base values, and derived stats and modifiers' effects

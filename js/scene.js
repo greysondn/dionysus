@@ -1060,7 +1060,7 @@ export class SceneView {
     if ((name === "seat") && (seat != null)) {
       ret = String(seat);
     } else if ((name === "seat_name") && (seat != null)) {
-      ret = this.app.seatName(seat);
+      ret = this.app.occupantName(seat);
     } else if (name.startsWith("count:")) {
       value = this.tree?.places?.[seatPath(name.slice(6), seat)];
       if (Array.isArray(value)) {

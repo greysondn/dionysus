@@ -32,12 +32,27 @@ export class Text {
     if (key && typeof key === "object") return this.t(key.key, key.params || {});
     const template = this.raw(key);
     if (template == null) return humanize(key, params);
-    return template.replace(/\{(\w+)\}/g, (_, name) => this.param(name, params[name]));
+    // "Seat {seat}" with a seat number reads as that seat's name, with its
+    // player after it, whatever game wrote the string.
+    const named = template.replace(/Seat \{(\w+)\}/g, (whole, name) => {
+      let ret = whole;
+
+      if (typeof params[name] === "number") {
+        ret = this.seatName(params[name]);
+      }
+
+      return ret;
+    });
+
+    return named.replace(/\{(\w+)\}/g, (_, name) => this.param(name, params[name]));
   }
 
   param(name, value) {
     if (value == null) return "";
     if (typeof value === "object" && value.key) return this.t(value);
+    // A seat a game names ({"seat": 2, "name": "Blue"}) reads as the seat's
+    // name with its player after it.
+    if (typeof value === "object" && typeof value.seat === "number") return this.seatName(value.seat, value.name ?? null);
     return String(value);
   }
 }

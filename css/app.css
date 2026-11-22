@@ -224,6 +224,10 @@ button.seat-value { min-height: 0; line-height: 1.4; }
 
 /* the generic state board: a mechanic's own corner, made readable */
 .state-panel .mechanic + .mechanic { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* a mechanic's data folds away; its title is the handle */
+.state-panel details.mechanic > summary { cursor: pointer; list-style-position: inside; }
+.state-panel details.mechanic > summary > h3 { display: inline; }
+.state-panel details.mechanic[open] > summary { margin-bottom: 8px; }
 .view-both .state-panel:only-child, .table-main > .state-panel { font-size: 1.05rem; }
 dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
 dl.kv dt { color: var(--muted); text-transform: capitalize; }
@@ -559,3 +563,8 @@ span.ok { color: var(--good); font-weight: 600; }
 .rulebook { line-height: 1.5; }
 .rulebook table { border-collapse: collapse; }
 .rulebook th, .rulebook td { border: 1px solid var(--line, #8884); padding: 0.2rem 0.5rem; }
+
+/* watching an all-bots tournament: a bar above the table being followed */
+.spectate { height: 100%; display: flex; flex-direction: column; }
+.spectate > .table-screen { height: auto; flex: 1 1 auto; min-height: 0; }
+.spectate-bar { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }

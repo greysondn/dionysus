@@ -7,6 +7,7 @@ import { Net } from "./net.js";
 import { ReplayScreen } from "./replay.js";
 import { sha256Hex } from "./softcrypto.js";
 import { TableScreen } from "./table.js";
+import { TournamentWatcher } from "./spectate.js";
 import { statsView } from "./statsview.js";
 import { Text } from "./text.js";
 import { themeButton } from "./theme.js";
@@ -36,6 +37,7 @@ class App {
     this.account = null;
     this.screen = null;
     this.table = null;
+    this.spectator = null;           // the watcher of an all-bots tournament, while one is watched
   }
 
   async start() {
@@ -383,6 +385,10 @@ class App {
   }
 
   go(where, arg) {
+    if (this.spectator) {
+      this.spectator.stop();
+      this.spectator = null;
+    }
     if (this.table) {
       this.net.request("tables.leave", { table_id: this.table.id }).catch(() => {});
       this.table.destroy();
@@ -686,6 +692,11 @@ class App {
   /** Open a table, or with `resume` (the screen kept when the connection dropped), go back to it with its state. */
   async openTable(id, opts, resume = null) {
     this.closeReplay();
+    // Anything but the watcher's own opening ends the watching.
+    if ((this.spectator) && (opts?.spectator !== this.spectator)) {
+      this.spectator.stop();
+      this.spectator = null;
+    }
     if (this.table && this.table !== resume) {
       this.table.destroy();
       this.table = null;
@@ -698,7 +709,11 @@ class App {
       screen = new TableScreen(this, id, opts || {});
     }
     this.table = screen;
-    clear(this.root, screen.el);
+    if (this.spectator) {
+      clear(this.root, h("div.spectate", {}, this.spectator.el, screen.el));
+    } else {
+      clear(this.root, screen.el);
+    }
     try {
       await screen.start();
       this.issueKey();                            // a seat keeps a key alive: leaving the last one ends it
@@ -1254,7 +1269,7 @@ class App {
         h("td", {}, `${tournament.runs_done}/${tournament.runs_total} runs`),
         h("td.small.muted", {}, `${tournament.bots.length} bots`),
         h("td", {}, tournament.error || ""),
-        h("td", {}, this.adminTournamentStop(tournament)),
+        h("td", {}, this.adminTournamentWatch(tournament), this.adminTournamentStop(tournament)),
       ),
     );
     let start = null;
@@ -1372,6 +1387,52 @@ class App {
       pickers.push(h("select", { dataset: { i } }, options));
     }
     clear(botSeats, pickers);
+  }
+
+  /**
+   * A Watch button for an all-bots tournament while it runs, which opens
+   * one view that follows the play from table to table.
+   *
+   * @param {object} tournament the tournament
+   * @returns {HTMLElement|null} the button, or null when it is over
+   */
+  adminTournamentWatch(tournament) {
+    let ret = null;
+
+    if (tournament.status === "running") {
+      ret = h(
+        "button.small",
+        {
+          title: "Watch every game of this tournament, one after another",
+          onclick: () => this.watchTournament(tournament.tournament_id),
+        },
+        "Watch",
+      );
+    }
+
+    return ret;
+  }
+
+  /**
+   * Watch a tournament: its table view, followed from run to run.
+   *
+   * @param {number} tournamentId the tournament
+   */
+  async watchTournament(tournamentId) {
+    this.spectator = new TournamentWatcher(this, tournamentId);
+    try {
+      await this.spectator.start();
+    } catch (e) {
+      this.spectator = null;
+      toast(e.message, "error");
+    }
+  }
+
+  /**
+   * Stop watching and go back to the admin page.
+   */
+  stopWatching() {
+    this.go("admin");
   }
 
   /**
