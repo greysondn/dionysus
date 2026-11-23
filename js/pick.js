@@ -133,6 +133,26 @@ function areaRank(key, seat) {
 }
 
 /**
+ * The ways a viewer can sort a place's hand: the sorts it names in
+ * `orders`, or else its `order_by` as the one sort, called "sorted".
+ *
+ * @param {object|undefined} declaration the place's declaration
+ * @returns {Array<{key: string, name: string, order_by: Array<object>}>}
+ *   the sorts, empty when the place declares none
+ */
+export function handSorts(declaration) {
+  let ret = [];
+
+  if ((declaration?.orders || []).length > 0) {
+    ret = declaration.orders;
+  } else if ((declaration?.order_by || []).length > 0) {
+    ret = [{ key: "sorted", name: "sorted", order_by: declaration.order_by }];
+  }
+
+  return ret;
+}
+
+/**
  * The spots in a place a token can go: one for a pile (on top), a place
  * that keeps itself sorted, an unordered place, or one the viewer sees
  * only a count of; and for a place kept in the order cards are laid, a
@@ -145,7 +165,7 @@ function areaRank(key, seat) {
 export function spotsFor(declaration, contents) {
   const isLaidOrder = (
     (declaration?.ordering === "ordered") &&
-    (!((declaration?.order_by || []).length > 0))
+    (handSorts(declaration).length === 0)
   );
   const ret = [];
 

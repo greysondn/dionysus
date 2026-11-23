@@ -199,14 +199,20 @@ export class GameLook {
 
   // ---------------------------------------------------------------- drawing
 
-  // An entity as the viewer sees it: its current side, or the back the server sent in place of it.
-  drawEntity(ent) {
+  // An entity as the viewer sees it: its current side, or the back the server sent in place of it. A token that says
+  // its owner sees its face (`owner_sees_face`) is drawn face up to its owner, the viewer's `seat`, though it lies on
+  // its hidden side; the server sends everyone else the back.
+  drawEntity(ent, seat = null) {
     if (ent.hidden) {
       const [w, hgt] = this.sizeOfSide(ent.back);
       return { node: this.drawSide(ent.back, {}, w, hgt), w, h: hgt };
     }
     const token = this.tokens.get(ent.kind);
-    const side = this.sideOf(token, ent.side || token?.default_side);
+    let key = ent.side || token?.default_side;
+    if (token?.owner_sees_face && seat != null && ent.owner === seat && key === (token.hidden_side || "back")) {
+      key = token.default_side || "front";
+    }
+    const side = this.sideOf(token, key);
     const [w, hgt] = this.sizeOfSide(side);
     const props = { ...(token?.properties || {}), ...(side?.properties || {}), ...(ent.props || {}) };
     if (ent.rolled != null) props.value = ent.rolled;

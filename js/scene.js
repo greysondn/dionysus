@@ -566,7 +566,7 @@ export class SceneView {
     // Nothing to show when the path names no entity.
     this.hidePeek();
     if ((ent != null) && (this.peekLayer != null)) {
-      drawn = this.look.drawEntity(ent);
+      drawn = this.look.drawEntity(ent, this.app.seat);
       k = PEEK_SIZE / Math.max(drawn.w, drawn.h, 1);
       cx = node.x + (middleX - node.x) * PEEK_PULL;
       cy = node.y + (middleY - node.y) * PEEK_PULL;
@@ -1288,7 +1288,7 @@ export class SceneView {
     const back = turnBack(this.turn || 0, this.reorientOf(token));
     const rotation = back + (ent.rotation || 0);
     const hint = this.takeHint(false);
-    let { node, w, h: hh } = this.look.drawEntity(ent);
+    let { node, w, h: hh } = this.look.drawEntity(ent, this.app.seat);
     let margin = 0;
     let k = 0;
     let scaled = null;

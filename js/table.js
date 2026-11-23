@@ -41,7 +41,7 @@ import { channelVolume, focusStar, playMedia, SceneView } from "./scene.js";
 import { PaneSizer } from "./panes.js";
 import { ToolBar } from "./toolbar.js";
 import { TradePanel } from "./tradepanel.js";
-import { PlacePicker } from "./pick.js";
+import { handSorts, PlacePicker } from "./pick.js";
 import { expansionsOn, houseRulesIn } from "./rules.js";
 import { apply } from "./patch.js";
 import { bytes, clear, dialog, h, icon, s, schemaForm, toast } from "./ui.js";
@@ -69,6 +69,8 @@ export class TableScreen {
     this.text = app.text;
     this.id = tableId;
     this.opts = opts;
+    // which of a hand's sorts is showing; -1 is as dealt
+    this.handSortIndex = -1;
     this.look = new GameLook(app.cache, app.text);
     this.look.resolveRemote = (reference) => this.remoteAsset(reference);
     this.viewerPreferences = new ViewerPreferences(app.net, tableId);     // every viewer choice at this table, in one place
@@ -2554,10 +2556,7 @@ export class TableScreen {
     }
 
     // The sort button, when it declares an order.
-    if (
-      (declaration?.order_by != null) &&
-      (declaration.order_by.length > 0)
-    ) {
+    if (handSorts(declaration).length > 0) {
       sortButton = this.sortButton(declaration);
     }
 
@@ -2585,35 +2584,66 @@ export class TableScreen {
 
   /**
    * A hand's sort button: it says the order the hand is in now, and a
-   * click switches to the other one.
+   * click steps to the next: as dealt, then each of the place's sorts,
+   * then as dealt again.
    *
    * @param {object} declaration the place's declaration, with an order
    * @returns {HTMLButtonElement} the button
    */
   sortButton(declaration) {
-    const keys = declaration.order_by.map((key) => key.property).join(", ");
+    const sorts = handSorts(declaration);
     const note = "Your arrangement is yours alone, and never logged.";
+    const now = this.handSort(declaration);
+    const next = sorts[(this.handSortIndex + 1) % (sorts.length + 1)] ?? null;
     let label = "Order: as dealt ▸";
-    let title = `Click to sort by ${keys}. ${note}`;
+    let title = "";
+    let nextName = "as dealt";
+    let keys = "";
 
-    // Name the order it is in now.
-    if (this.handSorted === true) {
-      label = "Order: sorted ▸";
-      title = `Sorted by ${keys}. Click to show as dealt. ${note}`;
+    // Name the order it is in now, and the one a click goes to.
+    if (next !== null) {
+      nextName = next.name;
+    }
+    title = `Click to show ${nextName}. ${note}`;
+    if (now !== null) {
+      keys = now.order_by.map((key) => key.property).join(", ");
+      label = `Order: ${now.name} ▸`;
+      title = `Sorted by ${keys}. Click to show ${nextName}. ${note}`;
     }
 
     return h(
       "button.ghost.small.hand-order",
-      { onclick: () => this.toggleHandSort(), title: title },
+      { onclick: () => this.stepHandSort(declaration), title: title },
       label,
     );
   }
 
   /**
-   * Switch the hand between sorted and as dealt, and redraw it.
+   * The sort the hand is in now.
+   *
+   * @param {object|undefined} declaration the place's declaration
+   * @returns {object|null} the sort, or null when it is as dealt
    */
-  toggleHandSort() {
-    this.handSorted = !this.handSorted;
+  handSort(declaration) {
+    const sorts = handSorts(declaration);
+    let ret = null;
+
+    if ((this.handSortIndex >= 0) && (this.handSortIndex < sorts.length)) {
+      ret = sorts[this.handSortIndex];
+    }
+
+    return ret;
+  }
+
+  /**
+   * Step the hand to its next sort, wrapping to as dealt, and redraw it.
+   *
+   * @param {object} declaration the place's declaration
+   */
+  stepHandSort(declaration) {
+    const count = handSorts(declaration).length;
+
+    this.handSortIndex = ((this.handSortIndex + 1) % (count + 1));
     this.renderHand();
   }
 
@@ -2897,23 +2927,20 @@ export class TableScreen {
   }
 
   /**
-   * A hand's tokens in the order to show them: sorted by the place's
-   * declared order when the viewer asked for that, or else as dealt.
+   * A hand's tokens in the order to show them: sorted by the sort the
+   * viewer picked, or else as dealt.
    *
    * @param {Array<string>} ids the place's token ids
    * @param {object|undefined} declaration the place's declaration
    * @returns {Array<string>} the ids in the order to show them
    */
   sortHand(ids, declaration) {
+    const sort = this.handSort(declaration);
     let ret = ids;
 
-    if (
-      (this.handSorted === true) &&
-      (declaration?.order_by != null) &&
-      (declaration.order_by.length > 0)
-    ) {
+    if (sort !== null) {
       ret = [...ids].sort((a, b) => (
-        this.compareHandTokens(a, b, declaration.order_by)
+        this.compareHandTokens(a, b, sort.order_by)
       ));
     }
 
